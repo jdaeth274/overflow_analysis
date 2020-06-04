@@ -83,6 +83,55 @@ cohort_allocator_parallel <- function(unique_rows, hes_dataset, hes_ids){
 }
 
 
+indiv_ICD_para <- function(ICD, num_cores, hes_data){
+  
+  current_ICD_data <- hes_data[hes_data$ICD == ICD,]
+  
+  hes_ids <- plyr::count(current_ICD_data)
+  hesid_rows <- seq(1, nrow(hes_ids))
+  
+  
+  print(paste("Setting up parralel job for ICD:", ICD))
+  cluster_function <- snow::makeCluster(spec = num_cores)
+  function_input <- snow::clusterSplit(cluster_function, hesid_rows)
+  print(paste("Copying over functions for ICD:", ICD))
+  snow::clusterExport(cluster_function, "cohort_allocator")
+  print(paste("Copying over data for ICD:", ICD))
+  copy_start <- Sys.time()
+  snow::clusterExport(cluster_function, "hes_ids", envir = environment())
+  snow::clusterExport(cluster_function, "current_ICD_data", envir = environment())
+  snow::clusterExport(cluster_function, "cohort_allocator_parallel")
+  copy_end <- Sys.time()
+  print(copy_end - copy_start)
+  print(paste("Running cohort allocation jobs for ICD:", ICD))
+  jobs_start <- Sys.time()
+  hes_data_parallel <- snow::clusterApply(cluster_function, function_input,
+                                          fun = cohort_allocator_parallel,
+                                          hes_ids = hes_ids,
+                                          hes_dataset = data)
+  stopCluster(cluster_function)
+  jobs_end <- Sys.time()
+  print(jobs_end - jobs_start)
+  hes_cohorts_df <- dplyr::bind_rows(hes_data_parallel)
+  
+  hes_cohorts_df <- hes_cohorts_df[order(hes_cohorts_df$index),]
+  data$cohort <- hes_cohorts_df$cohort
+  hes_cohorts_df <- data
+  
+  
+  print("Writing out results")
+  
+  
+  print("Finished")
+  end_time <- Sys.time()
+  
+  print((end_time - start_time))
+  return(hes_cohorts_df)
+  
+}
+
+
+
 
 cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_0913_TEMP02.csv"){
   
@@ -128,59 +177,23 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
     use_cores <- num_cores - 2
   }
   
-  hesid_rows <- seq(1, nrow(hes_ids))
+  
   
   print("Narrowing data")
   old_size <- pryr::object_size(data)
   
   parallel_cols <- which(colnames(data) %in% c("hesid","index","diag_01","cohort","rttstart",
-                                               "admidate_MDY"))
+                                               "admidate_MDY", "ICD"))
   
   
   parallel_data <- data[,parallel_cols]
   new_size <- pryr::object_size(parallel_data)
   print(paste("Old size:", old_size, "New size:", new_size))
   
+  ## ICD groups ###
   
-  print("Setting up parralel job")
-  cluster_function <- snow::makeCluster(spec = num_cores)
-  function_input <- snow::clusterSplit(cluster_function, hesid_rows)
-  print("COpying over functions")
-  snow::clusterExport(cluster_function, "cohort_allocator")
-  print("Copying over data")
-  copy_start <- Sys.time()
-  snow::clusterExport(cluster_function, "hes_ids", envir = environment())
-  snow::clusterExport(cluster_function, "parallel_data", envir = environment())
-  snow::clusterExport(cluster_function, "cohort_allocator_parallel")
-  copy_end <- Sys.time()
-  print(copy_end - copy_start)
-  print("Running cohort allocation jobs")
-  jobs_start <- Sys.time()
-  hes_data_parallel <- snow::clusterApply(cluster_function, function_input,
-                                          fun = cohort_allocator_parallel,
-                                          hes_ids = hes_ids,
-                                          hes_dataset = data)
-  stopCluster(cluster_function)
-  jobs_end <- Sys.time()
-  print(jobs_end - jobs_start)
-  hes_cohorts_df <- dplyr::bind_rows(hes_data_parallel)
+  ICD_groupings <- plyr::count(parallel_data$ICD)
   
-  hes_cohorts_df <- hes_cohorts_df[order(hes_cohorts_df$index),]
-  data$cohort <- hes_cohorts_df$cohort
-  hes_cohorts_df <- data
-  
-  
-  print("Writing out results")
-  
-  write.csv(hes_cohorts_df,
-            file = "E:/temp/hes_cohort_allocations_BIG.csv",
-            row.names = FALSE)
-  
-  print("Finished")
-  end_time <- Sys.time()
-  
-  print((end_time - start_time))
-  return(hes_cohorts_df)
   
   
 }
