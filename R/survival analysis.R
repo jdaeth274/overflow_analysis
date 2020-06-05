@@ -11,7 +11,7 @@
 
 failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies_survival_plot",
                              csv_survial_name){
-
+  ## Need to double check whether Waiting time is in there!
   
   # 1.1 Fit survival function
   surv_object <- Surv(time = cohort23$WaitingTime, event = cohort23$Elective2Emergency)
@@ -64,7 +64,9 @@ cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Rec
                                                           "CC, <25", "CC, 25-64", "CC, 65+","Died, <25",
                                                           "Died, 25-64","Died, 65+"),
                               ICD, unique_only = FALSE){
-  
+  ## This function takes the output of the competing risks model for emergency admissions and 
+  ## then plots our cumulative incidence curves and then returns (in LOS) the transitions probs
+  ## at day 7 and multiples of 7
 
   tests_pos <- grep("Tests", names(CI_dataset), ignore.case = TRUE)
   
@@ -347,19 +349,20 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
 # 3.1 GA transitions (Cohort = 3, event = ga_transitions == 1, 2, or 3, time = GA_LoS)
 
 
-cohort_1_competing_risk <- function(cohort1){
+cohort_1_competing_risk <- function(cohort1, current_ICD){
 
   # 3.1.1 Subset age-groups within cohort 3
   out_df <- data.frame(matrix(ncol = 8, nrow = 9))
   colnames(out_df) <- c("age","transitions", "ICD","coeff","variance","day_7","mean_7","median_7")
-  out$age <- rep(c("<25","25-64","65+"), each = 3)
-  out$transition <- rep(c(1,2,3), by = 3)
+  out_df$age <- rep(c("<25","25-64","65+"), each = 3)
+  out_df$transition <- rep(c(1,2,3), by = 3)
+  out_df$ICD <- current_ICD
   
   cc_out_df <- data.frame(matrix(ncol = 8, nrow = 9))
   colnames(cc_out_df) <- c("age","transitions", "ICD","coeff","variance","day_7","mean_7","median_7")
-  cc_out$age <- rep(c("<25","25-64","65+"), each = 3)
-  cc_out$transition <- rep(c(1,2,3), by = 3)
-  
+  cc_out_df$age <- rep(c("<25","25-64","65+"), each = 3)
+  cc_out_df$transition <- rep(c(1,2,3), by = 3)
+  cc_out_df$ICD <- current_ICD
   
   
   # 3.1.2 Give frequency of different GA transitions for each age-group
@@ -428,44 +431,44 @@ cohort_1_competing_risk <- function(cohort1){
     
     
     
-    out$coeff[age_rows[1]] <- CI.agegrp1_t1$coef
-    out$variance[age_rows[1]] <- CI.agegrp1_t1$var[1,1]
-    out$day_7[age_rows[1]] <- seven_t1
+    out_df$coeff[age_rows[1]] <- CI.agegrp1_t1$coef
+    out_df$variance[age_rows[1]] <- CI.agegrp1_t1$var[1,1]
+    out_df$day_7[age_rows[1]] <- seven_t1
     if(length(multi_7_t1) > 0)
-      out$mean_7[age_rows[1]] <- mean(multi_7_t1)
+      out_df$mean_7[age_rows[1]] <- mean(multi_7_t1)
     else
-      out$mean_7[age_rows[1]] <- seven_t1
+      out_df$mean_7[age_rows[1]] <- seven_t1
     if(length(multi_7_t1) > 0)
-      out$median_7[age_rows[1]] <- median(multi_7_t1)
+      out_df$median_7[age_rows[1]] <- median(multi_7_t1)
     else
-      out$median_7[age_rows[1]] <- seven_t1
+      out_df$median_7[age_rows[1]] <- seven_t1
     
     
     
-    out$coeff[age_rows[2]] <- CI.agegrp1_t2$coef
-    out$variance[age_rows[2]] <- CI.agegrp1_t2$var[1,1]
-    out$day_7[age_rows[2]] <- seven_t2
+    out_df$coeff[age_rows[2]] <- CI.agegrp1_t2$coef
+    out_df$variance[age_rows[2]] <- CI.agegrp1_t2$var[1,1]
+    out_df$day_7[age_rows[2]] <- seven_t2
     if(length(multi_7_t2) > 0)
-      out$mean_7[age_rows[2]] <- mean(multi_7_t2)
+      out_df$mean_7[age_rows[2]] <- mean(multi_7_t2)
     else
-      out$mean_7[age_rows[2]] <- seven_t2
+      out_df$mean_7[age_rows[2]] <- seven_t2
     if(length(multi_7_t2) > 0)
-      out$median_7[age_rows[2]] <- median(multi_7_t2)
+      out_df$median_7[age_rows[2]] <- median(multi_7_t2)
     else
-      out$median_7[age_rows[2]] <- seven_t2
+      out_df$median_7[age_rows[2]] <- seven_t2
     
     
-    out$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
-    out$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
-    out$day_7[age_rows[3]] <- seven_t3
+    out_df$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
+    out_df$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
+    out_df$day_7[age_rows[3]] <- seven_t3
     if(length(multi_7_t3) > 0)
-      out$mean_7[age_rows[3]] <- mean(multi_7_t3)
+      out_df$mean_7[age_rows[3]] <- mean(multi_7_t3)
     else
-      out$mean_7[age_rows[3]] <- seven_t3
+      out_df$mean_7[age_rows[3]] <- seven_t3
     if(length(multi_7_t3) > 0)
-      out$median_7[age_rows[3]] <- median(multi_7_t3)
+      out_df$median_7[age_rows[3]] <- median(multi_7_t3)
     else
-      out$median_7[age_rows[3]] <- seven_t3
+      out_df$median_7[age_rows[3]] <- seven_t3
     
       
       
@@ -536,44 +539,44 @@ cohort_1_competing_risk <- function(cohort1){
     
     
     
-    cc_out$coeff[age_rows[1]] <- CI.agegrp1_t1$coef
-    cc_out$variance[age_rows[1]] <- CI.agegrp1_t1$var[1,1]
-    cc_out$day_7[age_rows[1]] <- seven_t1
+    cc_out_df$coeff[age_rows[1]] <- CI.agegrp1_t1$coef
+    cc_out_df$variance[age_rows[1]] <- CI.agegrp1_t1$var[1,1]
+    cc_out_df$day_7[age_rows[1]] <- seven_t1
     if(length(multi_7_t1) > 0)
-      cc_out$mean_7[age_rows[1]] <- mean(multi_7_t1)
+      cc_out_df$mean_7[age_rows[1]] <- mean(multi_7_t1)
     else
-      cc_out$mean_7[age_rows[1]] <- seven_t1
+      cc_out_df$mean_7[age_rows[1]] <- seven_t1
     if(length(multi_7_t1) > 0)
-      cc_out$median_7[age_rows[1]] <- median(multi_7_t1)
+      cc_out_df$median_7[age_rows[1]] <- median(multi_7_t1)
     else
-      cc_out$median_7[age_rows[1]] <- seven_t1
+      cc_out_df$median_7[age_rows[1]] <- seven_t1
     
     
     
-    cc_out$coeff[age_rows[2]] <- CI.agegrp1_t2$coef
-    cc_out$variance[age_rows[2]] <- CI.agegrp1_t2$var[1,1]
-    cc_out$day_7[age_rows[2]] <- seven_t2
+    cc_out_df$coeff[age_rows[2]] <- CI.agegrp1_t2$coef
+    cc_out_df$variance[age_rows[2]] <- CI.agegrp1_t2$var[1,1]
+    cc_out_df$day_7[age_rows[2]] <- seven_t2
     if(length(multi_7_t2) > 0)
-      cc_out$mean_7[age_rows[2]] <- mean(multi_7_t2)
+      cc_out_df$mean_7[age_rows[2]] <- mean(multi_7_t2)
     else
-      cc_out$mean_7[age_rows[2]] <- seven_t2
+      cc_out_df$mean_7[age_rows[2]] <- seven_t2
     if(length(multi_7_t2) > 0)
-      cc_out$median_7[age_rows[2]] <- median(multi_7_t2)
+      cc_out_df$median_7[age_rows[2]] <- median(multi_7_t2)
     else
-      cc_out$median_7[age_rows[2]] <- seven_t2
+      cc_out_df$median_7[age_rows[2]] <- seven_t2
     
     
-    cc_out$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
-    cc_out$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
-    cc_out$day_7[age_rows[3]] <- seven_t3
+    cc_out_df$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
+    cc_out_df$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
+    cc_out_df$day_7[age_rows[3]] <- seven_t3
     if(length(multi_7_t3) > 0)
-      cc_out$mean_7[age_rows[3]] <- mean(multi_7_t3)
+      cc_out_df$mean_7[age_rows[3]] <- mean(multi_7_t3)
     else
-      cc_out$mean_7[age_rows[3]] <- seven_t3
+      cc_out_df$mean_7[age_rows[3]] <- seven_t3
     if(length(multi_7_t3) > 0)
-      cc_out$median_7[age_rows[3]] <- median(multi_7_t3)
+      cc_out_df$median_7[age_rows[3]] <- median(multi_7_t3)
     else
-      cc_out$median_7[age_rows[3]] <- seven_t3
+      cc_out_df$median_7[age_rows[3]] <- seven_t3
     
     
     
