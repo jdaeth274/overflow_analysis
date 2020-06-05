@@ -1,37 +1,16 @@
 # Title: Survival Analysis for OverFlow Deaths Project
-# Last updated: 31 May 2020
+# Last updated: 4 June 2020
 ###########################################################################################################################
 # install necessary packages
-require(tidyverse)
-require(survival)
-require(msSurv)
-require(plyr)
-require(timereg)
-require(ggplot2)
-require(ggpubr) ## need rtools installed for multi-plots
-require(haven)
-require(dplyr)
-require(tictoc)
-require(cmprsk)
 
 ###########################################################################################################################
 # set working directory
-setwd("D:/Overflows/kl1215")
-
-# Import survival analysis data
-
-data <- read_dta("survival analysis.dta")
-
-# Subset cohorts
-cohort1 <- subset(data, subset = cohort1 == 1)
-cohort2 <- subset(data, subset = cohort2 == 1)
-cohort3 <- subset(data, subset = cohort3 == 1)
-cohort23 <- subset(data, subset = cohort1 !=1)
 ###########################################################################################################################
 ###########################################################################################################################
 # 1. Failure function for Electives to Emergencies (Cohort = 2 & 3, event = Elective2Emergency == 1, time = WaitingTime)
 
-failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies_survival_plot"){
+failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies_survival_plot",
+                             csv_survial_name){
 
   
   # 1.1 Fit survival function
@@ -70,7 +49,7 @@ failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies
             file = csv_survival_name,
             row.names = FALSE)
   
-  return(csv_survival_name)
+  return(survival_df)
 
 }
 ###########################################################################################################################
@@ -355,7 +334,7 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   
   dev.off()
   
-  return(list(cuminc_df, los_df, cc_cuminc_df, ))
+  return(list(cuminc_df, los_df, cc_cuminc_df,cc_los))
   
 }
 # 2.1.3 Extract cumulative incidence functions (CIFs) and variance by transition type and age-group --> put in a df and export to csv
@@ -375,6 +354,13 @@ cohort_1_competing_risk <- function(cohort1){
   colnames(out_df) <- c("age","transitions", "ICD","coeff","variance","day_7","mean_7","median_7")
   out$age <- rep(c("<25","25-64","65+"), each = 3)
   out$transition <- rep(c(1,2,3), by = 3)
+  
+  cc_out_df <- data.frame(matrix(ncol = 8, nrow = 9))
+  colnames(cc_out_df) <- c("age","transitions", "ICD","coeff","variance","day_7","mean_7","median_7")
+  cc_out$age <- rep(c("<25","25-64","65+"), each = 3)
+  cc_out$transition <- rep(c(1,2,3), by = 3)
+  
+  
   
   # 3.1.2 Give frequency of different GA transitions for each age-group
   
@@ -485,30 +471,177 @@ cohort_1_competing_risk <- function(cohort1){
       
   }
   
+  
+  for(k in 1:3){
+    agegrp1 <- subset(cohort3, subset = agegrp_v3 == k)
+    tic("crr runtime")
+    print(paste("start running crrs agegrp:", k))
+    CI.agegrp1_t1 <- crr(ftime = agegrp1$cc_LoS, fstatus = agegrp1$cc_transitions, cov1 = agegrp1$WaitingTime, failcode = 1)
+    toc()
+    tic("crr runtime trans 2")
+    CI.agegrp1_t2 <- crr(ftime = agegrp1$cc_LoS, fstatus = agegrp1$cc_transitions, cov1 = agegrp1$WaitingTime, failcode = 2)
+    toc()
+    tic("crr runtime trans 3")
+    CI.agegrp1_t3 <- crr(ftime = agegrp1$cc_LoS, fstatus = agegrp1$cc_transitions, cov1 = agegrp1$WaitingTime, failcode = 3)
+    toc()
+    
+    print("end run")
+    
+    trans_age <- c()
+    
+    age_rows <- c((k*3) -2, (k*3) -1, (k*3))
+    cif1 <- as.data.frame(predict.crr(CI.agegrp1_t1, cov1 = 0))
+    cif2 <- as.data.frame(predict.crr(CI.agegrp1_t2, cov1 = 0))
+    cif3 <- as.data.frame(predict.crr(CI.agegrp1_t3, cov1 = 0))
+    
+    
+    if(7 %in% cif1[,1]){
+      seven_t1 <- cif1[cif1[,1] == 7, 2]
+    }else if(nrow(cif1[cif1[,1] <7, ]) > 0){
+      seven_t1 <- cif1[cif1[,1] < 7, 2]
+      seven_t1 <- max(seven_t1[,2])
+    }else{
+      seven_t1 <- 0
+    }
+    if(7 %in% cif2[,1]){
+      seven_t2 <- cif2[cif2[,1] == 7, 2]
+    }else if(nrow(cif2[cif2[,1] <7, ]) > 0){
+      seven_t2 <- cif2[cif2[,1] < 7, 2]
+      seven_t2 <- max(seven_t1[,2])
+    }else{
+      seven_t2 <- 0
+    }
+    if(7 %in% cif3[,1]){
+      seven_t3 <- cif3[cif3[,1] == 7, 2]
+    }else if(nrow(cif3[cif3[,1] <7, ]) > 0){
+      seven_t3 <- cif3[cif3[,1] < 7, 2]
+      seven_t3 <- max(seven_t1[,2])
+    }else{
+      seven_t3 <- 0
+    }
+    
+    seven_seq <- seq(7, 77, by = 7)
+    multi_7_t1  <- cif1[cif1[,1] %in% seven_seq, 2]
+    multi_7_t2  <- cif2[cif2[,1] %in% seven_seq, 2]
+    multi_7_t3  <- cif3[cif3[,1] %in% seven_seq, 2]
+    
+    multi_7_t1 <- c(0, multi_7_t1)
+    multi_7_t2 <- c(0, multi_7_t2)
+    multi_7_t3 <- c(0, multi_7_t3)
+    
+    multi_7_t1 <- multi_7_t1[2:length(multi_7_t1)] - multi_7_t1[1:(length(multi_7_t1) -1)]
+    multi_7_t2 <- multi_7_t2[2:length(multi_7_t2)] - multi_7_t1[1:(length(multi_7_t2) -1)]
+    multi_7_t3 <- multi_7_t3[2:length(multi_7_t3)] - multi_7_t1[1:(length(multi_7_t3) -1)]
+    
+    
+    
+    
+    cc_out$coeff[age_rows[1]] <- CI.agegrp1_t1$coef
+    cc_out$variance[age_rows[1]] <- CI.agegrp1_t1$var[1,1]
+    cc_out$day_7[age_rows[1]] <- seven_t1
+    if(length(multi_7_t1) > 0)
+      cc_out$mean_7[age_rows[1]] <- mean(multi_7_t1)
+    else
+      cc_out$mean_7[age_rows[1]] <- seven_t1
+    if(length(multi_7_t1) > 0)
+      cc_out$median_7[age_rows[1]] <- median(multi_7_t1)
+    else
+      cc_out$median_7[age_rows[1]] <- seven_t1
+    
+    
+    
+    cc_out$coeff[age_rows[2]] <- CI.agegrp1_t2$coef
+    cc_out$variance[age_rows[2]] <- CI.agegrp1_t2$var[1,1]
+    cc_out$day_7[age_rows[2]] <- seven_t2
+    if(length(multi_7_t2) > 0)
+      cc_out$mean_7[age_rows[2]] <- mean(multi_7_t2)
+    else
+      cc_out$mean_7[age_rows[2]] <- seven_t2
+    if(length(multi_7_t2) > 0)
+      cc_out$median_7[age_rows[2]] <- median(multi_7_t2)
+    else
+      cc_out$median_7[age_rows[2]] <- seven_t2
+    
+    
+    cc_out$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
+    cc_out$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
+    cc_out$day_7[age_rows[3]] <- seven_t3
+    if(length(multi_7_t3) > 0)
+      cc_out$mean_7[age_rows[3]] <- mean(multi_7_t3)
+    else
+      cc_out$mean_7[age_rows[3]] <- seven_t3
+    if(length(multi_7_t3) > 0)
+      cc_out$median_7[age_rows[3]] <- median(multi_7_t3)
+    else
+      cc_out$median_7[age_rows[3]] <- seven_t3
+    
+    
+    
+  }
+  
   # run this one as an example because it takes less time than the above
   
   ## what we need from this output: coef, var
-  cif2 <- predict.crr(CI.agegrp1_t2, cov1 = 0)
-  cif2
-  plot.predict.crr(cif2,lty = 1:(ncol(cif2) - 1), color = 1,  
-                   ylim = c(0, max(cif2[, -1])), xmin = 0, xmax = max(cif2[, 1]))
-  
-  cif2df<-data.frame(time=cif2[,1],cif=cif2[,2])
-  
-  model1 <- lm(cif ~ poly(time,5), data = cif2df)
-  pred <- predict(model1)
-  plot(cif2df$time, cif2df$cif)
-  lines(cif2df$time, pred, col = "red")
-  model1
   
   
-  
-  cif3 <- predict.crr(CI.agegrp1_t3, cov1 = 0)
-  plot.predict.crr(cif3,lty = 1:(ncol(cif3) - 1), color = 1,  
-                   ylim = c(0, max(cif3[, -1])), xmin = 0, xmax = max(cif3[, 1]))
-  
-  ## JD: can you make a similar function as above to extract the coefficient of waiting time, the CIFs and variances, and 7th day LOS TPs?
-
-  
-  return(out_df)
+  return(list(out_df, cc_out_df))
 }
+
+
+survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE){
+  require(tidyverse)
+  require(survival)
+  require(msSurv)
+  require(plyr)
+  require(timereg)
+  require(ggplot2)
+  require(ggpubr) ## need rtools installed for multi-plots
+  require(haven)
+  require(dplyr)
+  require(tictoc)
+  require(cmprsk)
+  
+  
+  # Import survival analysis data
+  
+  
+  # Subset cohorts
+  
+  if(single_ICD){
+  
+  cohort1 <- subset(cohorts_data, subset = cohort == 1)
+  cohort2 <- subset(cohorts_data, subset = cohort == 2)
+  cohort3 <- subset(cohorts_data, subset = cohort == 3)
+  cohort12 <- subset(cohorts_data, subset = cohort != 3)
+  
+  cohort12_failure_func <- failure_function(cohort23 = cohort12, csv_survial_name = "survival_for_groups")   
+  cohort_3_transitions <- cohort_3_comp_risks(cohort3, "one", results_pdf = "one_ICD_results")
+  cohort1_transitions <- cohort_1_competing_risk(cohort1)
+  
+  failure_res <- cohort12_failure_func
+  cohort_3_ga <- cohort_3_transitions[[2]]
+  cohort_3_cc <- cohort_3_transitions[[4]]
+  cohort_1_res_ga <- cohort1_transitions[[1]]
+  cohort_1_res_cc <- cohort1_transitions[[2]]
+  
+  
+  }else{
+    cohort1 <- subset(cohorts_data, subset = cohort == 1)
+    cohort2 <- subset(cohorts_data, subset = cohort == 2)
+    cohort3 <- subset(cohorts_data, subset = cohort == 3)
+    cohort12 <- subset(cohorts_data, subset = cohort != 3)
+    
+    cohort_1_icds <- plyr::count(cohort1$ICD)
+    cohort_3_icds <- plyr::count(cohort3$ICD)
+    
+    
+    
+    
+    
+  }
+  
+  return(list(failure_res, cohort_3_ga, cohort_3_cc, cohort_1_res_ga, cohort_1_res_cc))
+}
+
+
+

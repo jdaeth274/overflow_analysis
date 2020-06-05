@@ -2,8 +2,6 @@
 ## Transitions labelling in HES ###############################################
 ###############################################################################
 
-hes_dataset <- read.csv("E:/HES/COVID/HES_APC_CC_0913_TEMP02_s1.csv",
-                        stringsAsFactors = FALSE)
 
 
 ###############################################################################
@@ -94,7 +92,7 @@ hes_transitions <- function(hes_dataset){
   
 }
 
-hes_data_avec_trans <- hes_transitions(hes_dataset)
+
 
 
 
