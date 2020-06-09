@@ -176,7 +176,7 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
     
     
     print(paste("Setting up parallel job for ICD:", ICD))
-    cluster_function <- snow::makeCluster(spec = num_cores, outfile = "./out_file_cluster.txt")
+    cluster_function <- snow::makeCluster(spec = num_cores, outfile = "D:/Overflows/cluster_log_file.txt")
     function_input <- snow::clusterSplit(cluster_function, hesid_rows)
     print(paste("Copying over functions for ICD:", ICD))
     snow::clusterExport(cluster_function, "cohort_allocator")

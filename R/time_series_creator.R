@@ -123,7 +123,7 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   emergency_rows <- seq(1, nrows_df)
   tic("CLuster_Set_up")
   print("Setting up the parallel jobs")
-  cluster_function <- snow::makeCluster(spec = num_cores)
+  cluster_function <- snow::makeCluster(spec = num_cores, outfile = "D:/Overflows/ts_creat_log.txt")
   function_input <- snow::clusterSplit(cluster_function, emergency_rows)
   toc()
   tic("Function copy")

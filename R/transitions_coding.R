@@ -10,16 +10,20 @@
 
 hes_transitions <- function(hes_dataset){
   
+  if(tibble::is_tibble(hes_dataset)){
+    hes_dataset <- as.data.frame(hes_dataset)
+  }
+  
   ## cohort 3 WT 
   if(!("WaitingTimes" %in% colnames(hes_dataset))){
   
     print("Getting the WT data")
-  hes_dataset$WaitingTime <- NA
-  elective_df <- hes_dataset[hes_dataset$cohort == 1,]
-  one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
-  elective_df$WaitingTime[one_year_under] <- elective_df$elecdur[one_year_under]
-  hes_dataset[hes_dataset$cohort == 1, "WaitingTime"] <- elective_df$WaitingTime
-  
+    hes_dataset$WaitingTime <- NA
+    elective_df <- hes_dataset[hes_dataset$cohort == 1,]
+    one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
+    elective_df$WaitingTime[one_year_under] <- elective_df$elecdur[one_year_under]
+    hes_dataset[hes_dataset$cohort == 1, "WaitingTime"] <- elective_df$WaitingTime
+    
   
   }
   

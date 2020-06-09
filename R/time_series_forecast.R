@@ -515,10 +515,10 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_3_admi <- forecast_clean(cohort_3_admi, cohort_num = 3)
   cohort_3_frail <- forecast_clean(cohort_3_frail, cohort_num = 3)
   
-  cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 3)
-  cohort_1_median_wait <- forecast_clean(cohort_1_median_wait, cohort_num = 3)
-  cohort_1_mean_wait <- forecast_clean(cohort_1_mean_wait, cohort_num = 3)
-  cohort_1_frail <- forecast_clean(cohort_1_frail, cohort_num = 3)
+  cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 1)
+  cohort_1_median_wait <- forecast_clean(cohort_1_median_wait, cohort_num = 1)
+  cohort_1_mean_wait <- forecast_clean(cohort_1_mean_wait, cohort_num = 1)
+  cohort_1_frail <- forecast_clean(cohort_1_frail, cohort_num = 1)
   
   
   
