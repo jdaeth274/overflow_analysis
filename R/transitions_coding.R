@@ -9,23 +9,55 @@
 ###############################################################################
 
 hes_transitions <- function(hes_dataset){
-
-  ## ga to cc ##
   
+  ## cohort 3 WT 
+  if(!("WaitingTimes" %in% colnames(hes_dataset))){
+  
+    print("Getting the WT data")
+  hes_dataset$WaitingTime <- NA
+  elective_df <- hes_dataset[hes_dataset$cohort == 1,]
+  one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
+  elective_df$WaitingTime[one_year_under] <- elective_df$elecdur[one_year_under]
+  hes_dataset[hes_dataset$cohort == 1, "WaitingTime"] <- elective_df$WaitingTime
+  
+  
+  }
+  
+  ## cohort 12 waiting time 
+  print("Getting the WT data cohort 2")
+  cohort2_indies <- which(hes_dataset$cohort == 2)
+  wait_time <- hes_dataset$admidate_MDY[cohort2_indies] - hes_dataset$rttstart[cohort2_indies]
+  hes_dataset$WaitingTime[cohort2_indies] <- wait_time
+  
+  if(!("WT$" %in% colnames(hes_dataset))){
+    hes_dataset$WT <- hes_dataset$WaitingTime
+  }else{
+    hes_dataset$WT_old <- hes_dataset$WT
+    hes_dataset$WT <- hes_dataset$WaitingTime
+  }
+  
+  
+  ## Elective to Emergency 
+  print("Electives to emergencies")
+  hes_dataset$Elective2Emergency <- 0
+  hes_dataset$Elective2Emergency[which(hes_dataset$cohort == 2)] <- 1
+  
+  ## ga to cc ##
+  print("GA > CC")
   hes_dataset$ga_cc <- 0
   hes_dataset$ga_cc[which(hes_dataset$cc == 1)] <- 1
   odd_dismeth <- which(is.na(hes_dataset$dismeth))
   hes_dataset$ga_cc[odd_dismeth] <- NA
   
   ## CC to G&A ##
-  
+  print("CC > GA")
   hes_dataset$cc_ga <- 0
   hes_dataset[(hes_dataset$ccdisdest %in% c(1,2,3)) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg != 1),"cc_ga"] <- 1
   hes_dataset[!(is.na(hes_dataset$ccdisdest)) & (hes_dataset$ccdisdest > 3) & (hes_dataset$cc == 1), "cc_ga"] <- 0
   hes_dataset[hes_dataset$cc == 0, "cc_ga"] <- NA
   
   ## transitions to the grave ##
-  
+  print("morir")  
   hes_dataset[!is.na(hes_dataset$dismeth) & hes_dataset$dismeth == 5, "dismeth"] <- NA
   
   hes_dataset$death <- 0
@@ -33,20 +65,20 @@ hes_transitions <- function(hes_dataset){
   hes_dataset$death[which(is.na(hes_dataset$dismeth))] <- NA
   
   ## cc deaths ##
-  
+  print("CC deaths")
   hes_dataset$cc_death <- 0
   hes_dataset[(hes_dataset$dismeth == 4) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg == 1),"cc_death"] <- 1
   hes_dataset[!is.na(hes_dataset$ccdisdest) & (hes_dataset$ccdisdest == 6) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg == 1),"cc_death"] <- 1
   hes_dataset[hes_dataset$cc == 0 | is.na(hes_dataset$death),"cc_death" ] <- NA
   
   ## ga deaths ##
-  
+  print("GA deaths")
   hes_dataset$ga_death <- 0
   hes_dataset[!is.na(hes_dataset$dismeth) &hes_dataset$dismeth == 4 & hes_dataset$cc == 0, "ga_death"] <- 1
   hes_dataset$ga_death[which(is.na(hes_dataset$death))] <- NA
   
   ## ga to cc then die in ga ##
-  
+  print("GA>CC>GA deaths")
   hes_dataset$gaccga_death <- NA
   hes_dataset[!is.na(hes_dataset$dismeth) & !is.na(hes_dataset$ccdisdest) & (hes_dataset$dismeth == 4 | hes_dataset$ccdisdest == 6) & hes_dataset$cc == 1 & hes_dataset$cc_dis_flg != 1, "gaccga_death"] <- 1
   

@@ -13,7 +13,7 @@ cohort_allocator <- function(hes_data, hes_ids){
   
   #print("Starting cohort identification")
   
-  
+    
     
     for(k in 1:nrow(hes_ids)){
      #cat("\r","This percent done", (round((k/nrow(hes_ids)*100), digits = 6)), "%")
@@ -33,16 +33,22 @@ cohort_allocator <- function(hes_data, hes_ids){
           electives <- which(diag_data$cohort == 1)
           elective_rows <- diag_data[electives,]
           emergencies <- diag_data[-electives,]
+          elective_rows <- elective_rows[order(elective_rows$rttstart),]
+          
           
           for(elec in 1:nrow(elective_rows)){
+            indexers_to_change <- NULL
             current_elective <- elective_rows[elec,]
             start_date <- current_elective$rttstart
             end_date <- current_elective$admidate_MDY
             
             cohort_2ers <- which((emergencies$admidate_MDY >= start_date) &
                                    (emergencies$admidate_MDY <= end_date))
-            indexers_to_change <- emergencies$index[cohort_2ers]
+            if(length(cohort_2ers) > 0)
+              indexers_to_change <- emergencies$index[cohort_2ers]
             if(length(indexers_to_change) > 0){
+              new_indies <- which(!(indexers_to_change %in% index_altered))
+              indexers_to_change <- indexers_to_change[new_indies]
               index_altered <- base::append(index_altered, indexers_to_change)
               new_rttstart <- rep(current_elective$rttstart, length(indexers_to_change))
               rtt_start_date_2 <- append(rtt_start_date_2, new_rttstart)
@@ -62,7 +68,6 @@ cohort_allocator <- function(hes_data, hes_ids){
     if(length(index_altered) > 0){
       
       ## check for index duplicates (where an emergency overlaps two elective rttstarts and ends)
-      rtt_to_remove <- NULL
       if(length(index_altered) > 1){
         
         indy_date <- cbind.data.frame(index_altered, rtt_start_date_2)
@@ -72,13 +77,21 @@ cohort_allocator <- function(hes_data, hes_ids){
         
         indy_date <- indy_date[!duplicated(indy_date[,"index"]),]
         
+        
         index_altered <- indy_date$index
         rtt_start_date_2 <- indy_date$rtt
-        print(rtt_start_date_2)
+        
       }
       
       hes_data[hes_data$index %in% index_altered,"cohort"] <- 2
-      hes_data[hes_data$index %in% index_altered,"rttstart"] <- rtt_start_date_2
+      
+      for(rtt in 1:length(rtt_start_date_2)){
+        current_index <- index_altered[rtt]
+        current_rtt <- rtt_start_date_2[rtt]
+        
+        hes_data[hes_data$index == current_index,"rttstart"] <- current_rtt
+      
+      }
     }
     }
   
@@ -135,6 +148,7 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
                                             hes_dataset = current_ICD_data)
     snow::clusterEvalQ(cluster_function, rm(hes_ids, pos = environment()))
     snow::clusterEvalQ(cluster_function, rm(current_ICD_data, pos = environment()))
+    snow::clusterEvalQ(cluster_function, gc())
     stopCluster(cluster_function)
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
@@ -162,7 +176,7 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
     
     
     print(paste("Setting up parallel job for ICD:", ICD))
-    cluster_function <- snow::makeCluster(spec = num_cores, outfile = "D:/Overflows/cluster_log_file.txt")
+    cluster_function <- snow::makeCluster(spec = num_cores, outfile = "./out_file_cluster.txt")
     function_input <- snow::clusterSplit(cluster_function, hesid_rows)
     print(paste("Copying over functions for ICD:", ICD))
     snow::clusterExport(cluster_function, "cohort_allocator")
@@ -181,13 +195,15 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
                                             hes_dataset = hes_data)
     snow::clusterEvalQ(cluster_function, rm(hes_ids))
     snow::clusterEvalQ(cluster_function, rm(hes_data))
-    
+    snow::clusterEvalQ(cluster_function, gc())
     stopCluster(cluster_function)
+    
+    gc()
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
     hes_cohorts_df <- base::as.data.frame(dplyr::bind_rows(hes_data_parallel))
     
-    browser()
+    
     hes_cohorts_df <- hes_cohorts_df[order(hes_cohorts_df$index),]
     hes_data$cohort <- hes_cohorts_df$cohort
     hes_data$rttstart <- hes_cohorts_df$rttstart
@@ -204,8 +220,22 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
     return(hes_data)
   }
   
+
 }
 
+
+making_WT_variable <- function(hes_data){
+  
+  hes_data$WaitingTime <- NA
+  
+  cohort_1 <- hes_data[hes_data$cohort == 1,]
+  one_year_under <- which(as.integer(cohort_1$elecdur) <= 365)
+  cohort_1$WaitingTime[one_year_under] <- cohort_1$elecdur[one_year_under]
+  
+  cohort_2 <- hes_data[hes_data$cohort == 2,]
+  wait_times <- cohort_2$admidate_MDY - cohort_2$rttstart
+  
+}
 
 
 
@@ -312,6 +342,7 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   data$cohort_old <- data$cohort
   data$cohort <- total_res$cohort
   data$rttstart <- total_res$rttstart
+  data$admidate_MDY <- as.Date(data$admidate_MDY, format = "%d%b%Y")    
   
   }else{
     print("I.m in the one icd section !")
@@ -345,8 +376,10 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
     missing_indies <- which(!(data$index %in% total_res$index))
     data <- data[-missing_indies,]
     data$cohort_old <- data$cohort
+    
     data$cohort <- total_res$cohort
     data$rttstart <- total_res$rttstart
+    data$admidate_MDY <- as.Date(data$admidate_MDY, format = "%d%b%Y")    
     
     
   }

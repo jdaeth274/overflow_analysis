@@ -94,7 +94,7 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   
   emergencies_cols <- which(colnames(emergencies_only) %in% c("admidate_week", "admidate_YYYY",
                                                          "Frail","ICD","agegrp_v3"))
-  emergencies_only <- emergencies_cols[,emergencies_cols]
+  emergencies_only <- emergencies_only[,emergencies_cols]
   
   
   emergencies_only$week_year <- paste(as.character(emergencies_only$admidate_week),
@@ -121,22 +121,32 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   
   
   emergency_rows <- seq(1, nrows_df)
+  tic("CLuster_Set_up")
   print("Setting up the parallel jobs")
   cluster_function <- snow::makeCluster(spec = num_cores)
   function_input <- snow::clusterSplit(cluster_function, emergency_rows)
+  toc()
+  tic("Function copy")
   snow::clusterExport(cluster_function, "row_sumer")
   snow::clusterExport(cluster_function, "emergency_df_ts")
+  toc()
   print("Loading data onto parallel cores")
-  
+  tic("Loading data onto parallel cores")
   snow::clusterExport(cluster_function, "emergencies_only", envir = environment())
   snow::clusterExport(cluster_function, "emergency_out_Df", envir = environment())
   snow::clusterEvalQ(cluster_function, library(dplyr))
   snow::clusterEvalQ(cluster_function, library(stringr))
+  toc()
+  tic("Running on cores")
   print("Running on cores")
   emergency_data_parallel <- snow::clusterApply(cluster_function, function_input,
                                                 fun = emergency_df_ts,
                                                 emergencies_only = emergencies_only,
                                                 Emergency_out_df = emergency_out_Df)
+  toc()
+  snow::clusterEvalQ(cluster_function, rm(emergencies_only))
+  snow::clusterEvalQ(cluster_function, rm(emergencies_only))
+  snow::clusterEvalQ(cluster_function, gc())
   print("Finished")
   time_end <- Sys.time()
   print((time_end - time_start))
@@ -161,7 +171,7 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
 row_sumer_elective <- function(row_indy, out_row, hes_df){
   
   ## Same as aboe row_sumer just adding in waiting times for Electives
-  browser()
+  
   current_icd <- out_row[row_indy, 4]
   current_age <- out_row[row_indy, 5]
   current_week <- out_row[row_indy, 2]
@@ -172,6 +182,7 @@ row_sumer_elective <- function(row_indy, out_row, hes_df){
                           hes_df$rttstart_YYYY == current_year &
                           hes_df$rttstart_week == current_week, ]
   return_row <- out_row[row_indy,]
+  print(nrow(return_row))
   
   return_row$Admissions <- nrow(subset_hes)
   
@@ -194,6 +205,8 @@ row_sumer_elective <- function(row_indy, out_row, hes_df){
 
 
 elective_df_ts <- function(out_indies, electives_only_Df, electives_only){
+  
+  print(out_indies)
   
   elective_out_Df <- lapply(X = out_indies, FUN = row_sumer_elective,
                              out_row = elective_out_Df,
@@ -316,11 +329,16 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores){
   missing_rtt_week <- which(is.na(electives_only$rttstart_week))
   missing_rtt_year <- which(is.na(electives_only$rttstart_YYYY))
   
-  electives_only <- electives_only[-c(missing_rtt_week, missing_rtt_year),]
+  if(length(missing_rtt_week) >0)
+    electives_only <- electives_only[-missing_rtt_week,]  
+  if(length(missing_rtt_year) >0)
+    electives_only <- electives_only[-missing_rtt_year,]  
+  
   
   elective_cols <- which(colnames(electives_only) %in% c("rttstart_week", "rttstart_YYYY",
                                                          "WT","Frail","ICD","agegrp_v3"))
   electives_only <- electives_only[,elective_cols]
+  
   
   
   electives_only$week_year <- paste(as.character(electives_only$rttstart_week),
@@ -333,6 +351,8 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores){
   num_icd <- length(icds)
   num_ages <- 3
   nrows_df <- num_weeks * num_ages * num_icd
+  print(paste("Num weeks:", num_weeks))
+  print(paste("Num icd:", icds))
   
   elective_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 8))
   colnames(elective_out_Df) <- c("rttstart_YYYY","rttstart_week",
@@ -344,27 +364,37 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores){
   elective_out_Df$rttstart_week <- rep(as.integer(weeks_year_split[,1]),(num_ages * num_icd))
   elective_out_Df$ICD <- rep(icds, each = num_weeks * num_ages)
   elective_out_Df$agegrp_v3 <- rep(rep(age_groupings, each = num_weeks), num_icd)
-  
+  tic("Creating parallel jobs")
   print("Creating parallel jobs")
+  print(nrows_df)
   elective_rows <- seq(1, nrows_df)
-  cluster_function <- snow::makeCluster(spec = num_cores)
+  cluster_function <- snow::makeCluster(spec = num_cores,  outfile = "D:/Overflows/cluster_log_file_TS.txt")
   function_input <- snow::clusterSplit(cluster_function, elective_rows)
+  toc()
+  tic("Loading up elective functions")
   print("Loading up elective functions")
   snow::clusterExport(cluster_function, "row_sumer_elective")
   snow::clusterExport(cluster_function, "elective_df_ts")
+  toc()
+  tic("Loading up elective data")
   print("Loading up elective data")
   snow::clusterExport(cluster_function, "electives_only", envir = environment())
   snow::clusterExport(cluster_function, "elective_out_Df", envir = environment())
   
   snow::clusterEvalQ(cluster_function, library(dplyr))
   snow::clusterEvalQ(cluster_function, library(stringr))
+  toc()
+  tic("Running parallel jobs")
   print("Running parallel jobs")
   elective_data_parallel <- snow::clusterApply(cluster_function, function_input,
                                                 fun = elective_df_ts,
                                                 electives_only = electives_only,
                                                electives_only_Df = elective_out_Df)
-  stopCluster(cluster_function)
   
+  snow::clusterEvalQ(cluster_function, rm(electives_only))
+  snow::clusterEvalQ(cluster_function, rm(elective_out_Df))
+  snow::clusterEvalQ(cluster_function, gc())
+    stopCluster(cluster_function)
   elective_data <- dplyr::bind_rows(elective_data_parallel)
   
   print("Finished")
@@ -383,7 +413,8 @@ time_series_creator <- function(hes_data, num_cores){
   require(stringr)
   require(plyr)
   require(dplyr)
-  require(snow)  
+  require(snow)
+  require(tictoc)
   emergency_ts <- running_emergencies_ts_in_parallel(hes_data, num_cores = num_cores)
   electives_ts <- running_elective_ts_in_parallel(hes_data = hes_data,
                                                   num_cores = num_cores)

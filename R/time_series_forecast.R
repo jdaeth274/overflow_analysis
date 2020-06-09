@@ -1,24 +1,9 @@
-library(tidyverse)
-library(ggplot2)
-library(lubridate)
-library(KFAS)
-library(ggpubr)
-library(forecast)
-setwd("~/Dropbox/covid19/overflow_analysis/")
 
 ## new cohort data ##
 
-cohort_1_ts <- read.csv("~/Dropbox/covid19/overflow_analysis/time_series_data/TS_cohort1_ICDAge.csv",
-                        stringsAsFactors = FALSE)
-cohort_2_ts <- read.csv("~/Dropbox/covid19/overflow_analysis/time_series_data/TS_cohorts2_ICDAge.csv",
-                        stringsAsFactors = FALSE)
-cohort_3_ts <- read.csv("~/Dropbox/covid19/overflow_analysis/time_series_data/TS_cohorts3_ICDAge.csv",
-                        stringsAsFactors = FALSE)
-cohort_3_ts_admissions <- read.csv("~/Dropbox/covid19/overflow_analysis/time_series_data/TS_cohorts3_ICDAge_admidate.csv",
-                                   stringsAsFactors = FALSE)
 
 diagnostics_function <- function(train_data, metric, out, title_name){
-  
+  library(ggpubr)  
   train_data$one.step.res.std<-as.numeric(rstandard(out,type='recursive'))
   
   admis <- ggplot(train_data)+aes(x=date,y=train_data[,2], colour = "blue")+geom_line()+
@@ -98,7 +83,8 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                               diagnostics_only = FALSE,
                               wait_time_col = "p50_WTwkyy",
                               cohort3 = FALSE, train_date = "2012-01-01",
-                              only_ICD = NULL){
+                              only_ICD = NULL,
+                              forecast_period = 52){
   
 
   # join the year and week variable to a date. Use UK  convention that week starts on a Monday.
@@ -154,7 +140,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
   
   for ( age in unique(ts_data$agegrp_v3)){
       for (d in icds_to_look_at){
-          cat("\r","On group number:", current_group)
+          cat("On group number:", current_group)
           #print(paste("On group number:", current_group))
           current_group <- current_group + 1
           temp<-ts_data[ts_data$agegrp_v3==age &
@@ -165,7 +151,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
           if(cohort3 == TRUE){
             
           }
-          
+
           
           test<-sum(temp$Admissions>0)>10
           if (test){
@@ -201,22 +187,36 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             ## Diagnostics for admissions #####################################
             ###################################################################
             
+            if(diagnostics_only == TRUE){
+            
             diagnostics_function(Train, metric = "Admissions", out,
                                  title_name = paste(d,age,ad) )
-            
+            }
+              
             if(diagnostics_only == FALSE){
               
-              df<-temp[,c('date',"Admissions")]
+              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+              forecast_weeks <- forecast_weeks[-1]
+              pred_admi <- temp[temp$date > max(Train$date), 'Admissions']
+              if(length(pred_admi) < length(forecast_weeks))
+                pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
+              
+              tot_dates <- c(Train$date, forecast_weeks)
+              tot_ad <- c(Train$Admissions, pred_admi)
+              
+              df <- cbind.data.frame(tot_dates, tot_ad)
+              colnames(df) <- c("date","Admissions")
               df<-df[order(df$date),]
               df$signal<-NA
               df[df$date <= max(Train$date),'signal']<-Train$predicted
               
               
               
-              n<-nrow(temp[temp$date>max(Train$date),])
+              n<-forecast_period
+              
               
               v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,n)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
                                  SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
               
               pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
@@ -284,18 +284,30 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             ## Diagnostics ####################################################
             ###################################################################
             
+            if(diagnostics_only == TRUE){
+            
             diagnostics_function(Train, metric = "Wait time", out,
                                  title_name = paste(d,age,ad) )
-            
+            }
             if(diagnostics_only == FALSE){
-              df<-temp[,c('date',wait_time_col)]
+              
+              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+              forecast_weeks <- forecast_weeks[-1]
+              pred_admi <- temp[temp$date > max(Train$date), wait_time_col]
+              if(length(pred_admi) < length(forecast_weeks))
+                pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+              
+              tot_dates <- c(Train$date, forecast_weeks)
+              tot_ad <- c(Train[,wait_time_col], pred_admi)
+              df <- cbind.data.frame(tot_dates, tot_ad)
+              colnames(df) <- c("date","Wait_time")
               df<-df[order(df$date),]
               df$signal<-NA
               df[df$date <= max(Train$date),'signal']<-Train$predicted
               
               
               
-              n<-nrow(temp[temp$date>max(Train$date),])
+              n<-forecast_period
               
               v<-var(residuals(out,type="response"))
               newdata<-SSModel(rep(NA,n)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
@@ -364,24 +376,34 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
             Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
             
-            
+            if(diagnostics_only == TRUE){
             diagnostics_function(Train, metric = "Proportion frail", out,
                                  title_name = paste(d,age,ad) )
-            
+            }
             
             if(diagnostics_only == FALSE){
-            
-              df<-temp[,c('date',"prop_Frail")]
+              
+              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+              forecast_weeks <- forecast_weeks[-1]
+              pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]
+              if(length(pred_admi) < length(forecast_weeks))
+                pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+              
+              tot_dates <- c(Train$date, forecast_weeks)
+              tot_ad <- c(Train[,"prop_Frail"], pred_admi)
+              df <- cbind.data.frame(tot_dates, tot_ad)
+              colnames(df) <- c("date","prop_Frail")
+              
               df<-df[order(df$date),]
               df$signal<-NA
               df[df$date <= max(Train$date),'signal']<-Train$predicted
               
               
               
-              n<-nrow(temp[temp$date>max(Train$date),])
+              n<-forecast_period
               
               v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,n)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
                                  SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
               
               pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
@@ -426,154 +448,86 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
 }
 
 
-test_cohort_1 <- forecast_function(cohort_1_ts, results_name = "cohort_1_admissions_mar_train_frail.pdf",
-                                   forecast_admissions = TRUE, diagnostics_only = FALSE, forecast_frail = TRUE,
-                                   admit_type = "Emergency",
-                                   train_date = "2012-02-25")
-
-test_cohort_2 <- forecast_function(cohort_2_ts, results_name = "cohort_2_admissions.pdf",
-                                   forecast_admissions = TRUE, diagnostics_only = FALSE,
-                                   admit_type = "Emergency",
-                                   train_date = "2012-02-01")
-
-test_cohort_3_new_median <- forecast_function(cohort_3_ts, results_name = "cohort_3_new_patients.pdf",
-                                       forecast_admissions = TRUE, forecast_frail = FALSE,
-                                       forecast_wait = TRUE,
-                                       admit_type = "Elective", cohort3 = TRUE,
-                                       wait_time_col = "p50_WT_ICDc", train_date = "2012-02-25")
-
-test_cohort_3_new_mean <- forecast_function(cohort_3_ts, results_name = "cohort_3_new_patientsmean.pdf",
-                                            forecast_admissions = FALSE, forecast_wait = TRUE, forecast_frail = TRUE,
-                                       admit_type = "Elective", cohort3 = TRUE,
-                                       wait_time_col = "mean_WT_ICDc", diagnostics_only = FALSE,
-                                       train_date = "2012-02-25", only_ICD = "Neoplasms")
+forecast_clean <- function(df_out, cohort_num){
+  patient_groupings <- str_split_fixed(df_out$patient_group, "_", 3)
+  df_out$cohort <- cohort_num
+  df_out$age <- patient_groupings[,3]
+  df_out$icd_name <- patient_groupings[,2]
+  
+  
+  return(df_out)
+  
+}
 
 
-###############################################################################
-## Lets get the neoplasms out of there! #######################################
-###############################################################################
+running_forecasts <- function(total_cohort_data, train_date, forecast_period, single_icd = NULL, base_dir){
+  #library(tidyverse)
+  library(ggplot2)
+  library(lubridate)
+  library(KFAS)
+  library(stringr)
+  library(forecast)
+  
+  cohort_3_ts <- total_cohort_data[[1]]
+  cohort_1_ts_admissions <- total_cohort_data[[2]]
 
-cohort_1_admi <- test_cohort_1[[1]]
-cohort_1_frail <- test_cohort_1[[3]]
+  cohort_3_plots <- paste(base_dir,"cohort_3_admissions_and_frail.pdf", sep = "")
+  cohort_1_med_plot <- paste(base_dir, "cohort_1_pool_and_median_WT.pdf",sep = "")
+  cohort_1_med_plot <- paste(base_dir, "cohort_1_frail_and_mean_WT.pdf",sep = "")
+  
+  test_cohort_3 <- forecast_function(cohort_3_ts, results_name = cohort_3_plots,
+                                     forecast_admissions = TRUE, diagnostics_only = FALSE, forecast_frail = TRUE,
+                                     admit_type = "Emergency",
+                                     train_date = train_date,
+                                     only_ICD = single_icd,
+                                     forecast_period = forecast_period)
+  
+  test_cohort_1_new_median <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_med_plot,
+                                         forecast_admissions = TRUE, forecast_frail = FALSE,
+                                         forecast_wait = TRUE,
+                                         admit_type = "Elective", cohort3 = TRUE,
+                                         wait_time_col = "p50_WT_ICDc", train_date = train_date,
+                                         forecast_period = forecast_period,
+                                         only_ICD = single_icd)
+  
+  test_cohort_1_new_mean <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_med_plot,
+                                              forecast_admissions = FALSE, forecast_wait = TRUE, forecast_frail = TRUE,
+                                         admit_type = "Elective", cohort3 = TRUE,
+                                         wait_time_col = "mean_WT_ICDc", diagnostics_only = FALSE,
+                                         train_date = train_date, only_ICD = single_icd,
+                                         forecast_period = forecast_period)
+  
+  
+  ###############################################################################
+  ## Lets get the neoplasms out of there! #######################################
+  ###############################################################################
+  
+  
+  cohort_3_admi <- test_cohort_3[[1]]
+  cohort_3_frail <- test_cohort_3[[3]]
+  
+  cohort_1_admi <- test_cohort_1_new_median[[1]]
+  cohort_1_median_wait <- test_cohort_1_new_median[[2]]
+  cohort_1_mean_wait <- test_cohort_1_new_mean[[2]]
+  cohort_1_frail <- test_cohort_1_new_mean[[3]]
+  
+  
+  cohort_3_admi <- forecast_clean(cohort_3_admi, cohort_num = 3)
+  cohort_3_frail <- forecast_clean(cohort_3_frail, cohort_num = 3)
+  
+  cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 3)
+  cohort_1_median_wait <- forecast_clean(cohort_1_median_wait, cohort_num = 3)
+  cohort_1_mean_wait <- forecast_clean(cohort_1_mean_wait, cohort_num = 3)
+  cohort_1_frail <- forecast_clean(cohort_1_frail, cohort_num = 3)
+  
+  
+  
+  return(list(cohort_3_admi, cohort_3_frail, 
+              cohort_1_admi, cohort_1_median_wait,
+              cohort_1_mean_wait, cohort_1_frail))
+  
 
-cohort_3_admi <- test_cohort_3_new_median[[1]]
-cohort_3_median_wait <- test_cohort_3_new_median[[2]]
-
-cohort_3_mean_wait <- test_cohort_3_new_mean[[2]]
-cohort_3_frail <- test_cohort_3_new_mean[[3]]
-
-
-
-cohort_1_neos <- grep("Neoplasms", cohort_1_admi$patient_group, ignore.case = TRUE)
-cohort_1_admi_neos <- cohort_1_admi[cohort_1_neos,]
-
-patient_groupings <- str_split_fixed(cohort_1_admi_neos$patient_group, "_", 3)
-cohort_1_admi_neos$cohort <- 1
-cohort_1_admi_neos$age <- patient_groupings[,3]
-cohort_1_admi_neos$icd_name <- patient_groupings[,2]
-cohort_1_admi_neos$icd_num <- 2
-
-cohort_1_neos_frail <- grep("Neoplasms", cohort_1_frail$patient_group, ignore.case = TRUE)
-cohort_1_frail_neos <- cohort_1_frail[cohort_1_neos_frail,]
-patient_groupings <- str_split_fixed(cohort_1_frail_neos$patient_group, "_", 3)
-cohort_1_frail_neos$cohort <- 1
-cohort_1_frail_neos$age <- patient_groupings[,3]
-cohort_1_frail_neos$icd_name <- patient_groupings[,2]
-cohort_1_frail_neos$icd_num <- 2
-
-
-
-write.csv(cohort_1_admi_neos,
-          file = "~/Dropbox/covid19/overflow_analysis/time_series_data/neoplasms_admissions_cohort_1.csv",
-          row.names = FALSE)
-write.csv(cohort_1_frail_neos,
-          file = "~/Dropbox/covid19/overflow_analysis/time_series_data/neoplasms_frail_cohort_1.csv",
-          row.names = FALSE)
-
-
-cohort_3_neos <- grep("Neoplasms", cohort_3_admi$patient_group, ignore.case = TRUE)
-cohort_3_admi_neos <- cohort_3_admi[cohort_3_neos,]
-patient_groupings <- str_split_fixed(cohort_3_admi_neos$patient_group, "_", 3)
-cohort_3_admi_neos$cohort <- 3
-cohort_3_admi_neos$age <- patient_groupings[,3]
-cohort_3_admi_neos$icd_name <- patient_groupings[,2]
-cohort_3_admi_neos$icd_num <- 2
-
-
-
-cohort_3_neos_wait <- grep("Neoplasms", cohort_3_median_wait$patient_group, ignore.case = TRUE)
-cohort_3_wait_neos <- cohort_3_median_wait[cohort_3_neos_wait,]
-patient_groupings <- str_split_fixed(cohort_3_wait_neos$patient_group, "_", 3)
-cohort_3_wait_neos$cohort <- 3
-cohort_3_wait_neos$age <- patient_groupings[,3]
-cohort_3_wait_neos$icd_name <- patient_groupings[,2]
-cohort_3_wait_neos$icd_num <- 2
-
-write.csv(cohort_3_admi_neos,
-          file = "~/Dropbox/covid19/overflow_analysis/time_series_data/neoplasms_new_pool_cohort_3.csv",
-          row.names = FALSE)
-write.csv(cohort_3_wait_neos,
-          file = "~/Dropbox/covid19/overflow_analysis/time_series_data/neoplasms_median_wait_cohort_3.csv",
-          row.names = FALSE)
-
-
-cohort_3_meaners <- grep("Neoplasms", cohort_3_mean_wait$patient_group, ignore.case = TRUE)
-cohort_3_wait_mean <- cohort_3_mean_wait[cohort_3_meaners,]
-patient_groupings <- str_split_fixed(cohort_3_wait_mean$patient_group, "_", 3)
-cohort_3_wait_mean$cohort <- 3
-cohort_3_wait_mean$age <- patient_groupings[,3]
-cohort_3_wait_mean$icd_name <- patient_groupings[,2]
-cohort_3_wait_mean$icd_num <- 2
-
-
-
-cohort_3_frail_grep <- grep("Neoplasms", cohort_3_frail$patient_group, ignore.case = TRUE)
-cohort_3_frail_new <- cohort_3_frail[cohort_3_frail_grep,]
-patient_groupings <- str_split_fixed(cohort_3_frail_new$patient_group, "_", 3)
-cohort_3_frail_new$cohort <- 3
-cohort_3_frail_new$age <- patient_groupings[,3]
-cohort_3_frail_new$icd_name <- patient_groupings[,2]
-cohort_3_frail_new$icd_num <- 2
-
-write.csv(cohort_3_wait_mean,
-          file = "~/Dropbox/covid19/overflow_analysis/time_series_data/neoplasms_mean_wait_cohort_3.csv",
-          row.names = FALSE)
-write.csv(cohort_3_frail_new,
-          file = "~/Dropbox/covid19/overflow_analysis/time_series_data/neoplasms_frail_cohort_3.csv",
-          row.names = FALSE)
-
-
-
-
-
-
-nrow(cohort_1_admi_neos)/3
-
-
-
-cohort_1_admi_neos$frail <- cohort_1_admi_neos$median * cohort_1_admi_neos$median
-
-
-
-neoplasms_wt_fr <- forecast_function(data, results_name = "admissions_diagnostics.pdf",forecast_wait = FALSE,
-                  forecast_admissions = TRUE, forecast_frail = FALSE)
-
-write.csv(neoplasms_wt_fr[[2]],
-          file = "~/Dropbox/covid19/overflow_analysis/neoplasms_WT_2012-13.csv",
-          row.names = FALSE)
-write.csv(neoplasms_wt_fr[[3]],
-          file = "~/Dropbox/covid19/overflow_analysis/neoplasms_Frailty_2012-13.csv",
-          row.names = FALSE)
-
-
-write.csv(neoplasms,
-          file = "~/Dropbox/covid19/overflow_analysis/neoplasm_predictions_2012-2013.csv",
-          row.names = FALSE)
-
-
-###############################################################################
-## Forecasting for the different cats #########################################
-###############################################################################
+}
 
 indiviudal_plot_function <- function(temp, ad, d, age){
   
@@ -755,7 +709,4 @@ forecast_function_altered_grouping <- function(ts_data, results_name = "results_
   dev.off()
   
 }
-
-forecast_function_altered_grouping(ts_data = data)
-plot(seq(0,100,1))
 

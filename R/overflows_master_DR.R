@@ -14,11 +14,24 @@ require(KFAS)
 require(forecast)
 require(pryr)
 
-source(file = "D:/Overflows/cohort_identification.R")
-source(file = "D:/Overflows/survival analysis.R")
-source(file = "D:/Overflows/transitions_coding.R")
-source(file = "D:/Overflows/time_series_creator.R")
-source(file = "D:/Overflows/time_series_forecast.R")
+setwd("E:/HES/COVID/")
+
+source(file = "C:/Users/dr314/Dropbox/COVID19/Overflow/Rscript/R/cohort_identification.R")
+source(file = "C:/Users/dr314/Dropbox/COVID19/Overflow/Rscript/R/transitions_coding.R")
+source(file = "C:/Users/dr314/Dropbox/COVID19/Overflow/Rscript/R/survival analysis.R")
+
+
+tesdt_df <- data.frame(matrix(ncol = 100, nrow = 1000, data = 100.9))
+
+for(k in 1:nrow(tesdt_df)){
+  current_val <- tesdt_df[k,1]
+  print(current_val)
+  
+}
+
+
+
+neos_one <- vroom(file = "./HES_APC_CC_0912_Neoplasms1.csv", delim = ",")
 
 
 
@@ -29,15 +42,19 @@ input_args <- commandArgs(trailingOnly = TRUE)
 hes_data <- vroom(input_args[1], delim = ",")
 
 
-cohort_allocation <- cohort_set_up(num_cores = 12,
-                                   data_loc = "D:/Overflows/HES_APC_CC_0912_Neoplasmsv2.csv")
+cohort_allocation <- cohort_set_up(num_cores = 14,
+                                   data_loc = "E:/HES/COVID/HES_APC_CC_0912_Neoplasms1.csv")
+                                    
 transitions_data <- hes_transitions(cohort_allocation)
+system.time(save(transitions_data, file = "E:/HES/COVID/HES_APC_CC_09_13_Temp02_transitions.RData"))
 
-transitions_data <- vroom("D:/Overflows/neo_trans.csv", delim = ",", num_threads = 8)
+
+## Just for neoplasms ##
+neos_transitions <- transitions_data[transitions_data$ICD == 2,]
 
 
-survival_res <- survival_analysis_set_up(transitions_data, single_ICD = TRUE, base_dir = "D:/Overflows",
-                                         single_icd = "2")
+
+survival_res <- survival_analysis_set_up(transitions_data, single_ICD = TRUE, base_dir = "C:/Users/dr314/Dropbox/COVID19/Overflow/")
 
 failure_func_df <- survival_res[[1]]
 emergency_ga <- survival_res[[2]]
@@ -45,23 +62,16 @@ emergency_cc <- survival_res[[3]]
 elective_ga <- survival_res[[4]]
 elective_cc <- survival_res[[5]]
 
-transitions_data$ICD <- "2"
-source(file = "D:/Overflows/time_series_creator.R")
-time_series <- time_series_creator(transitions_data, num_cores = 12)
-source(file = "D:/Overflows/time_series_forecast.R")
-times_series_data <- running_forecasts(total_cohort_data = time_series, train_date = as.Date("2012-03-01"),
-                                       forecast_period = 52, single_icd = 2, base_dir = "D:/Overflows/")
+
+#test_1 <- cohort_allocation[cohort_allocation$hesid == "09A941FAB40A2072CEBE9064E9241B5E",]
 
 
-test_1 <- cohort_allocation[cohort_allocation$hesid == "09A941FAB40A2072CEBE9064E9241B5E",]
-
-
-neo_vals <- vroom("D:/Overflows/HES_APC_CC_0912_Neoplasmsv2.csv", delim = ",")
+neo_vals <- vroom("E:/HES/COVID/HES_APC_CC_0913_TEMP02.csv", delim = ",")
 ###############################################################################
 ## Function list here: 
 
 
-test_data <- vroom("D:/Overflows/HES_APC_CC_0912_Neoplasmsv2.csv",
+test_data <- vroom("E:/HES/COVID/HES_APC_CC_0913_TEMP02.csv",
                    delim = ",")
 test_rows <- plyr::count(test_hesid)
 test_data_narrow <- test_data[test_data$hesid == test_hesid,]

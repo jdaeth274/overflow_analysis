@@ -9,9 +9,30 @@
 ###########################################################################################################################
 # 1. Failure function for Electives to Emergencies (Cohort = 2 & 3, event = Elective2Emergency == 1, time = WaitingTime)
 
+make_wt_variable <- function(elective_df){
+  browser()
+  one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
+  
+  elective_df$WT <- NA
+  elective_df$WT[one_year_under] <- elective_df$elecdur[one_year_under]
+  
+  return(elective_df)
+  
+}
+
+
+
+
 failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies_survival_plot",
                              csv_survial_name){
   ## Need to double check whether Waiting time is in there!
+  start_time <- Sys.time()
+  print("Failure function for electives to emergencies")
+  if(!("WaitingTime" %in% colnames(cohort23))){
+    cohort23 <- make_wt_variable(cohort23)
+    WT_colname <- which(colnames(cohort23) == "WT")
+    colnames(cohort23)[WT_colname] <- "WaitingTime"
+  }
   
   # 1.1 Fit survival function
   surv_object <- Surv(time = cohort23$WaitingTime, event = cohort23$Elective2Emergency)
@@ -26,13 +47,13 @@ failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies
   survival_plot_2 <- ggplot(data = survival_df, aes(x = time, y = survival, group = age_group, colour = age_group)) +
           geom_line() + xlab("Waiting time (days)") + ylab("Survival probability") + ylim(c(0,1)) + labs(colour = "Age group") +
           ggtitle("Survival function")
-  survival_plot_2
+  
   
   # 1.3 Plot failure function
   cumhaz_plot_2 <- ggplot(data = survival_df, aes(x = time, y = cumulative_hazard, group = age_group, colour = age_group)) +
           geom_line() + xlab("Waiting time (days)") + ylab("Failure probability") + ylim(c(0,1)) + labs(colour = "Age group") +
           ggtitle("Failure function (cumulative hazard)")
-  cumhaz_plot_2
+  
   
   # 1.4 Put failure function and standard errors into a df --> export to csv
   #### This needs to be in the correct dir, from the setwd from above ####
@@ -48,6 +69,9 @@ failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies
   write.csv(survival_df,
             file = csv_survival_name,
             row.names = FALSE)
+  
+  end_time <- Sys.time()
+  print(end_time - start_time)
   
   return(survival_df)
 
@@ -97,7 +121,7 @@ cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Rec
   max_time <- max(cuminc_df$time)
   
   multiplesofseven <- seq(7,max_time, by = 7)
-  seventh_day_timies <- timepoints(CI.byagegrp,multiplesofseven) 
+  seventh_day_timies <- timepoints(CI_dataset,multiplesofseven) 
   
   
   
@@ -226,11 +250,13 @@ cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Rec
 cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   library(cmprsk)
   library(msSurv)
-  
+    
   # 2.1.1 Give frequency of different GA transitions
   
   
   # 2.1.2 Set survival datatset (grouped by age groups)
+  print("On GA transitions")
+  ga_start <- Sys.time()
   CI.byagegrp <- cuminc(ftime = cohort1$GA_LoS, fstatus = cohort1$ga_transitions, group = cohort1$agegrp_v3)
   
   # THIS GIVES US THE CIF AT THE SPECIFIC TIME POINT (I DON'T KNOW HOW TO GET A SPECIFIC RISK/AGE-GROUP, IT JUST RETURNS ALL OF THEM)
@@ -275,6 +301,11 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   # 2.1.5 Test for significant differences in CIF curves between the age-groups at each competing risk (recover, cc, dying)
   CI.byagegrp$Tests
   
+  end_time <- Sys.time()
+  print(end_time - ga_start)
+  print("Now on CC transitions")
+  
+  cc_start <- Sys.time()
   pdf(file = results_pdf, paper = "a4r")
   
   cuminc_plot
@@ -336,6 +367,10 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   
   dev.off()
   
+  
+  end_time <- Sys.time()
+  print(end_time - cc_start)
+  
   return(list(cuminc_df, los_df, cc_cuminc_df,cc_los))
   
 }
@@ -350,7 +385,15 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
 
 
 cohort_1_competing_risk <- function(cohort1, current_ICD){
-
+  
+  if(!("WaitingTime" %in% colnames(cohort1))){
+    cohort23 <- make_wt_variable(cohort1)
+    WT_colname <- which(colnames(cohort1) == "WT")
+    colnames(cohort1)[WT_colname] <- "WaitingTime"
+  }
+  
+  print("Now on Competing risk cohort 1")
+  
   # 3.1.1 Subset age-groups within cohort 3
   out_df <- data.frame(matrix(ncol = 8, nrow = 9))
   colnames(out_df) <- c("age","transitions", "ICD","coeff","variance","day_7","mean_7","median_7")
@@ -367,8 +410,13 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
   
   # 3.1.2 Give frequency of different GA transitions for each age-group
   
+  
+  
+  
+  
   for(k in 1:3){
-    agegrp1 <- subset(cohort3, subset = agegrp_v3 == k)
+    print(paste("On GA age group:", k))
+    agegrp1 <- subset(cohort1, subset = agegrp_v3 == k)
     tic("crr runtime")
     print(paste("start running crrs agegrp:", k))
     CI.agegrp1_t1 <- crr(ftime = agegrp1$GA_LoS, fstatus = agegrp1$ga_transitions, cov1 = agegrp1$WaitingTime, failcode = 1)
@@ -385,16 +433,16 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
     trans_age <- c()
     
     age_rows <- c((k*3) -2, (k*3) -1, (k*3))
-    cif1 <- as.data.frame(predict.crr(CI.agegrp1_t1, cov1 = 0))
-    cif2 <- as.data.frame(predict.crr(CI.agegrp1_t2, cov1 = 0))
-    cif3 <- as.data.frame(predict.crr(CI.agegrp1_t3, cov1 = 0))
+    cif1 <- predict.crr(CI.agegrp1_t1, cov1 = 0)
+    cif2 <- predict.crr(CI.agegrp1_t2, cov1 = 0)
+    cif3 <- predict.crr(CI.agegrp1_t3, cov1 = 0)
     
     
     if(7 %in% cif1[,1]){
       seven_t1 <- cif1[cif1[,1] == 7, 2]
     }else if(nrow(cif1[cif1[,1] <7, ]) > 0){
       seven_t1 <- cif1[cif1[,1] < 7, 2]
-      seven_t1 <- max(seven_t1[,2])
+      seven_t1 <- max(seven_t1)
     }else{
       seven_t1 <- 0
     }
@@ -402,7 +450,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
       seven_t2 <- cif2[cif2[,1] == 7, 2]
     }else if(nrow(cif2[cif2[,1] <7, ]) > 0){
       seven_t2 <- cif2[cif2[,1] < 7, 2]
-      seven_t2 <- max(seven_t1[,2])
+      seven_t2 <- max(seven_t2)
     }else{
       seven_t2 <- 0
     }
@@ -410,7 +458,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
       seven_t3 <- cif3[cif3[,1] == 7, 2]
     }else if(nrow(cif3[cif3[,1] <7, ]) > 0){
       seven_t3 <- cif3[cif3[,1] < 7, 2]
-      seven_t3 <- max(seven_t1[,2])
+      seven_t3 <- max(seven_t3)
     }else{
       seven_t3 <- 0
     }
@@ -476,7 +524,9 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
   
   
   for(k in 1:3){
-    agegrp1 <- subset(cohort3, subset = agegrp_v3 == k)
+    print(paste("On CC age group:", k))
+    
+    agegrp1 <- subset(cohort1, subset = agegrp_v3 == k)
     tic("crr runtime")
     print(paste("start running crrs agegrp:", k))
     CI.agegrp1_t1 <- crr(ftime = agegrp1$cc_LoS, fstatus = agegrp1$cc_transitions, cov1 = agegrp1$WaitingTime, failcode = 1)
@@ -493,16 +543,17 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
     trans_age <- c()
     
     age_rows <- c((k*3) -2, (k*3) -1, (k*3))
-    cif1 <- as.data.frame(predict.crr(CI.agegrp1_t1, cov1 = 0))
-    cif2 <- as.data.frame(predict.crr(CI.agegrp1_t2, cov1 = 0))
-    cif3 <- as.data.frame(predict.crr(CI.agegrp1_t3, cov1 = 0))
+    
+    cif1 <- predict.crr(CI.agegrp1_t1, cov1 = 0)
+    cif2 <- predict.crr(CI.agegrp1_t2, cov1 = 0)
+    cif3 <- predict.crr(CI.agegrp1_t3, cov1 = 0)
     
     
     if(7 %in% cif1[,1]){
       seven_t1 <- cif1[cif1[,1] == 7, 2]
     }else if(nrow(cif1[cif1[,1] <7, ]) > 0){
       seven_t1 <- cif1[cif1[,1] < 7, 2]
-      seven_t1 <- max(seven_t1[,2])
+      seven_t1 <- max(seven_t1)
     }else{
       seven_t1 <- 0
     }
@@ -510,7 +561,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
       seven_t2 <- cif2[cif2[,1] == 7, 2]
     }else if(nrow(cif2[cif2[,1] <7, ]) > 0){
       seven_t2 <- cif2[cif2[,1] < 7, 2]
-      seven_t2 <- max(seven_t1[,2])
+      seven_t2 <- max(seven_t2)
     }else{
       seven_t2 <- 0
     }
@@ -518,7 +569,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
       seven_t3 <- cif3[cif3[,1] == 7, 2]
     }else if(nrow(cif3[cif3[,1] <7, ]) > 0){
       seven_t3 <- cif3[cif3[,1] < 7, 2]
-      seven_t3 <- max(seven_t1[,2])
+      seven_t3 <- max(seven_t3)
     }else{
       seven_t3 <- 0
     }
@@ -591,7 +642,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
 }
 
 
-survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE){
+survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, single_icd  ){
   require(tidyverse)
   require(survival)
   require(msSurv)
@@ -611,24 +662,39 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE){
   # Subset cohorts
   
   if(single_ICD){
+    
   
-  cohort1 <- subset(cohorts_data, subset = cohort == 1)
-  cohort2 <- subset(cohorts_data, subset = cohort == 2)
-  cohort3 <- subset(cohorts_data, subset = cohort == 3)
-  cohort12 <- subset(cohorts_data, subset = cohort != 3)
-  
-  cohort12_failure_func <- failure_function(cohort23 = cohort12, csv_survial_name = "survival_for_groups")   
-  cohort_3_transitions <- cohort_3_comp_risks(cohort3, "one", results_pdf = "one_ICD_results")
-  cohort1_transitions <- cohort_1_competing_risk(cohort1)
-  
-  failure_res <- cohort12_failure_func
-  cohort_3_ga <- cohort_3_transitions[[2]]
-  cohort_3_cc <- cohort_3_transitions[[4]]
-  cohort_1_res_ga <- cohort1_transitions[[1]]
-  cohort_1_res_cc <- cohort1_transitions[[2]]
-  
+    cols_needed <- c("WaitingTime","Elective2Emergency","GA_LoS","ga_transitions",
+                     "agegrp_v3","cc_LoS","cc_transitions")
+    cols_to_keep <- which(colnames(cohorts_data) %in% cols_needed)
+    
+    cohort1 <- cohorts_data[cohorts_data$cohort == 1, cols_to_keep]
+    cohort2 <- cohorts_data[cohorts_data$cohort == 2, cols_to_keep]
+    cohort3 <- cohorts_data[cohorts_data$cohort == 3, cols_to_keep]
+    cohort12 <- cohorts_data[cohorts_data$cohort != 3, cols_to_keep]
+    
+    
+    failure_pdf <- paste(base_dir, "/survival_plot.pdf", sep = "")
+    failure_csv <- paste(base_dir, "/survival_for_groups.csv", sep = "")
+    transitions_pdf <- paste(base_dir, "/one_ICD_results.pdf", sep = "")
+    
+    cohort12_failure_func <- failure_function(cohort23 = cohort12, csv_survial_name = failure_csv,
+                                              pdf_to_export = failure_pdf)   
+    cohort_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = single_icd, results_pdf = transitions_pdf)
+    cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = single_icd)
+    
+    failure_res <- cohort12_failure_func
+    cohort_3_ga <- cohort_3_transitions[[2]]
+    cohort_3_cc <- cohort_3_transitions[[4]]
+    cohort_1_res_ga <- cohort1_transitions[[1]]
+    cohort_1_res_cc <- cohort1_transitions[[2]]
+    
   
   }else{
+    cols_needed <- c("WaitingTime","Elective2Emergency","GA_LoS","ga_transitions",
+                     "agegrp_v3","cc_LoS","cc_transitions")
+    cols_to_keep <- which(colnames(cohorts_data) %in% cols_needed)
+    
     cohort1 <- subset(cohorts_data, subset = cohort == 1)
     cohort2 <- subset(cohorts_data, subset = cohort == 2)
     cohort3 <- subset(cohorts_data, subset = cohort == 3)
@@ -636,6 +702,7 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE){
     
     cohort_1_icds <- plyr::count(cohort1$ICD)
     cohort_3_icds <- plyr::count(cohort3$ICD)
+    
     
     
     
