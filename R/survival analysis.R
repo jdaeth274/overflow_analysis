@@ -249,7 +249,7 @@ cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Rec
 
 cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   library(cmprsk)
-  library(msSurv)
+
     
   # 2.1.1 Give frequency of different GA transitions
   
@@ -387,6 +387,62 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
 crr_cluster_run <- function(fail_type, cohort_data){
   current_fail <- as.integer(str_split_fixed(fail_type, "-",2)[1])
   current_type <- as.character(str_split_fixed(fail_type,"-",2)[2])
+  
+  
+  
+  if(current_type == "ga"){
+    if(nrow(cohort_data[cohort_data$ga_transitions == current_fail,]) <= 1){
+      return(list(0,0))
+    }else{
+        agegrp_3_2_time <- cohort_data$GA_LoS
+        agegrp_3_2_trans <- cohort_data$ga_transitions
+        agegrp_3_2_WT <- cohort_data$WaitingTime
+        
+        na_tims <- which(is.na(agegrp_3_2_time))
+        agegrp_3_2_time <- agegrp_3_2_time[-na_tims]
+        agegrp_3_2_trans <- agegrp_3_2_trans[-na_tims]
+        agegrp_3_2_WT <- agegrp_3_2_WT[-na_tims]
+        old_na <- which(is.na(agegrp_3_2_trans))
+        agegrp_3_2_trans[old_na] <- 0
+        if(current_fail != 1){
+          old_2ers <- which(agegrp_3_2_trans == current_fail)
+          old_1ers <- which(agegrp_3_2_trans == 1)
+          
+          agegrp_3_2_trans[old_2ers] <- 1
+          agegrp_3_2_trans[old_1ers] <- 2
+          
+        }
+        
+        
+        CI.agegrp1_t1 <- fastCrr(Crisk(agegrp_3_2_time, agegrp_3_2_trans, failcode = 1) ~ agegrp_3_2_WT,
+                                          variance = TRUE, returnDataFrame = TRUE)
+        
+        # cif1_pred <- predict(CI.agegrp1_t1, newdata = 0, tL = 1)
+        # cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF)
+        cif1_pred <- fastcmprsk:::predict.fcrr(CI.agegrp1_t1, newdata = 0, tL = 1)
+        cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF)
+    }
+  }else if(current_type == "cc"){
+    if(nrow(cohort_data[cohort_data$cc_transitions == current_fail,]) <= 1){
+      return(list(0,0))
+    }else{
+      CI.agegrp1_t1 <- crr(ftime = cohort_data$cc_LoS, fstatus = cohort_data$cc_transitions,
+                           cov1 = cohort_data$WaitingTime, failcode = current_fail)
+      cif1_pred <- predict.crr(CI.agegrp1_t1, cov1 = 0)
+    }
+  }
+  
+  return(list(CI.agegrp1_t1, cif1_pred))
+    
+}
+
+crr_cluster_run_18 <- function(fail_type, cohort_data){
+  current_fail <- as.integer(str_split_fixed(fail_type, "-",3)[1])
+  current_type <- as.character(str_split_fixed(fail_type,"-",3)[2])
+  current_age <- as.character(str_split_fixed(fail_type,"-",3)[3])
+  
+  cohort_data <- cohort_data[cohort_data$agegrp_v3 == as.integer(current_age),]
+  
   if(current_type == "ga"){
     agegrp_3_2_time <- cohort_data$GA_LoS
     agegrp_3_2_trans <- cohort_data$ga_transitions
@@ -409,20 +465,26 @@ crr_cluster_run <- function(fail_type, cohort_data){
     
     
     CI.agegrp1_t1 <- fastCrr(Crisk(agegrp_3_2_time, agegrp_3_2_trans, failcode = 1) ~ agegrp_3_2_WT,
-                                      variance = TRUE, returnDataFrame = TRUE)
+                             variance = TRUE, returnDataFrame = TRUE)
+    
+    # cif1_pred <- predict(CI.agegrp1_t1, newdata = 0, tL = 1)
+    # cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF)
+    cif1_pred <- fastcmprsk:::predict.fcrr(CI.agegrp1_t1, newdata = 0, tL = 1)
+    cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF)
+    
   }else if(current_type == "cc"){
     CI.agegrp1_t1 <- crr(ftime = cohort_data$cc_LoS, fstatus = cohort_data$cc_transitions,
                          cov1 = cohort_data$WaitingTime, failcode = current_fail)
+    cif1_pred <- predict.crr(CI.agegrp1_t1, cov1 = 0)
+    
   }
-    
-  return(CI.agegrp1_t1)
-    
+  
+  return(list(CI.agegrp1_t1, cif1_pred))
+  
 }
 
 
-
-
-cohort_1_competing_risk <- function(cohort1, current_ICD){
+cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
   
   if(!("WaitingTime" %in% colnames(cohort1))){
     cohort23 <- make_wt_variable(cohort1)
@@ -447,19 +509,261 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
   
   
   # 3.1.2 Give frequency of different GA transitions for each age-group
+  if(core_18 == FALSE){
+      transitions_type <- rep(c("1","2","3"), 2)
+      area_codes <- rep(c("ga","cc"), each = 3)
+      typies <- paste(transitions_type, area_codes, sep = "-")
+  }else{
+    transitions_type <- rep(c("1","2","3"), 6)
+    area_codes <- rep(rep(c("ga","cc"), each = 3), 3)
+    age_codes <- rep(c(1,2,3), each = 6)
+    age_typies <- paste(transitions_type,area_codes,age_codes, sep = "-")
+  }
   
-  transitions_type <- rep(c("1","2","3"), 2)
-  area_codes <- rep(c("ga","cc"), each = 3)
-  typies <- paste(transitions_type, area_codes, sep = "-")
-  
+  if(core_18){
+    print("Running all ICD at once")
+    print("Setting up cluster run")
+    tic("Cluster set up:")
+    
+    crr_cluster <- snow::makeCluster(spec = 18, outfile = "./crr_cluster_log.txt")
+    toc()
+    crr_input <- snow::clusterSplit(crr_cluster, age_typies)
+    
+    snow::clusterExport(crr_cluster, "crr_cluster_run")
+    print(paste("Copying over data for ICD"))
+    copy_start <- Sys.time()
+    snow::clusterExport(crr_cluster, "cohort1", envir = environment())
+    copy_end <- Sys.time()
+    print(copy_end - copy_start)
+    snow::clusterEvalQ(crr_cluster, require(cmprsk))
+    snow::clusterEvalQ(crr_cluster, require(stringr))
+    snow::clusterEvalQ(crr_cluster, require(fastcmprsk, lib.loc = "C:/R-3.6.2/library"))
+    print(paste("Running CRR jobs for ICD"))
+    jobs_start <- Sys.time()
+    crr_data_parallel <- snow::clusterApply(crr_cluster, crr_input,
+                                            fun = crr_cluster_run_18,
+                                            cohort_data = cohort1)
+    snow::clusterEvalQ(crr_cluster, rm(cohort1))
+    snow::clusterEvalQ(crr_cluster, gc())
+    stopCluster(crr_cluster)
+    jobs_end <- Sys.time()
+    print(jobs_end - jobs_start)
+    
+    
+    for(k in 1:3){
+      agieos <- seq(((k*6) - 5), K*6)
+      
+      CI.agegrp1_t1 <- crr_data_parallel[[agieos[1]]][[1]]
+      CI.agegrp1_t2 <- crr_data_parallel[[agieos[2]]][[1]]
+      CI.agegrp1_t3 <- crr_data_parallel[[agieos[3]]][[1]]
+      
+      CI.agegrp1_t1_cc <- crr_data_parallel[[agieos[4]]][[1]]
+      CI.agegrp1_t2_cc <- crr_data_parallel[[agieos[5]]][[1]]
+      CI.agegrp1_t3_cc <- crr_data_parallel[[agieos[6]]][[1]]
+      
+      age_rows <- c((k*3) -2, (k*3) -1, (k*3))
+      tic("Predicting trans 1")
+      cif1_pred <- crr_data_parallel[[agieos[1]]][[2]]
+      toc()
+      tic("Predicting trans 2")
+      cif2_pred <- crr_data_parallel[[agieos[2]]][[2]]
+      toc()
+      tic("Predicting trans 3")
+      cif3_pred <- ccr_data_parallel[[agieos[3]]][[2]]
+      toc()
+      
+      cif1 <- cbind(cif1_pred$ftime, cif1_pred$CIF)
+      cif2 <- cbind(cif2_pred$ftime, cif2_pred$CIF)
+      cif3 <- cbind(cif3_pred$ftime, cif3_pred$CIF)
+      
+      browser()
+      
+      if(7 %in% cif1[,1]){
+        seven_t1 <- cif1[cif1[,1] == 7, 2]
+      }else if(nrow(cif1[cif1[,1] <7, ,drop = FALSE]) > 0){
+        seven_t1 <- cif1[cif1[,1] < 7, 2]
+        seven_t1 <- max(seven_t1)
+      }else{
+        seven_t1 <- 0
+      }
+      if(7 %in% cif2[,1]){
+        seven_t2 <- cif2[cif2[,1] == 7, 2]
+      }else if(nrow(cif2[cif2[,1] <7, ,drop = FALSE]) > 0){
+        seven_t2 <- cif2[cif2[,1] < 7, 2]
+        seven_t2 <- max(seven_t2)
+      }else{
+        seven_t2 <- 0
+      }
+      if(7 %in% cif3[,1]){
+        seven_t3 <- cif3[cif3[,1] == 7, 2]
+      }else if(nrow(cif3[cif3[,1] <7, ,drop = FALSE]) > 0){
+        seven_t3 <- cif3[cif3[,1] < 7, 2]
+        seven_t3 <- max(seven_t3)
+      }else{
+        seven_t3 <- 0
+      }
+      
+      seven_seq <- seq(7, 77, by = 7)
+      multi_7_t1  <- cif1[cif1[,1] %in% seven_seq, 2]
+      multi_7_t2  <- cif2[cif2[,1] %in% seven_seq, 2]
+      multi_7_t3  <- cif3[cif3[,1] %in% seven_seq, 2]
+      
+      multi_7_t1 <- c(0, multi_7_t1)
+      multi_7_t2 <- c(0, multi_7_t2)
+      multi_7_t3 <- c(0, multi_7_t3)
+      
+      multi_7_t1 <- multi_7_t1[2:length(multi_7_t1)] - multi_7_t1[1:(length(multi_7_t1) -1)]
+      multi_7_t2 <- multi_7_t2[2:length(multi_7_t2)] - multi_7_t1[1:(length(multi_7_t2) -1)]
+      multi_7_t3 <- multi_7_t3[2:length(multi_7_t3)] - multi_7_t1[1:(length(multi_7_t3) -1)]
+      
+      
+      
+      
+      out_df$coeff[age_rows[1]] <- crr_data_parallel[[1]]$coef
+      out_df$variance[age_rows[1]] <- crr_data_parallel[[1]]$var[1,1]
+      out_df$day_7[age_rows[1]] <- seven_t1
+      if(length(multi_7_t1) > 0)
+        out_df$mean_7[age_rows[1]] <- mean(multi_7_t1)
+      else
+        out_df$mean_7[age_rows[1]] <- seven_t1
+      if(length(multi_7_t1) > 0)
+        out_df$median_7[age_rows[1]] <- median(multi_7_t1)
+      else
+        out_df$median_7[age_rows[1]] <- seven_t1
+      
+      
+      
+      out_df$coeff[age_rows[2]] <- crr_data_parallel[[2]]$coef
+      out_df$variance[age_rows[2]] <- crr_data_parallel[[2]]$var[1,1]
+      out_df$day_7[age_rows[2]] <- seven_t2
+      if(length(multi_7_t2) > 0)
+        out_df$mean_7[age_rows[2]] <- mean(multi_7_t2)
+      else
+        out_df$mean_7[age_rows[2]] <- seven_t2
+      if(length(multi_7_t2) > 0)
+        out_df$median_7[age_rows[2]] <- median(multi_7_t2)
+      else
+        out_df$median_7[age_rows[2]] <- seven_t2
+      
+      
+      out_df$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
+      out_df$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
+      out_df$day_7[age_rows[3]] <- seven_t3
+      if(length(multi_7_t3) > 0)
+        out_df$mean_7[age_rows[3]] <- mean(multi_7_t3)
+      else
+        out_df$mean_7[age_rows[3]] <- seven_t3
+      if(length(multi_7_t3) > 0)
+        out_df$median_7[age_rows[3]] <- median(multi_7_t3)
+      else
+        out_df$median_7[age_rows[3]] <- seven_t3
+      
+      
+      age_rows <- c((k*3) -2, (k*3) -1, (k*3))
+      
+      cif1_cc <- crr_data_parallel[[agieos[4]]][[2]]
+      cif2_cc <- crr_data_parallel[[agieos[5]]][[2]]
+      cif3_cc <- crr_data_parallel[[agieos[6]]][[2]]
+      
+      
+      if(7 %in% cif1_cc[,1]){
+        seven_t1_cc <- cif1_cc[cif1_cc[,1] == 7, 2]
+      }else if(nrow(cif1_cc[cif1_cc[,1] <7,,drop = FALSE ]) > 0){
+        seven_t1_cc <- cif1_cc[cif1_cc[,1] < 7, 2]
+        seven_t1_cc <- max(seven_t1_cc)
+      }else{
+        seven_t1_cc <- 0
+      }
+      if(7 %in% cif2_cc[,1]){
+        seven_t2_cc <- cif2_cc[cif2_cc[,1] == 7, 2]
+      }else if(nrow(cif2_cc[cif2_cc[,1] <7, ,drop = FALSE]) > 0){
+        seven_t2_cc <- cif2_cc[cif2_cc[,1] < 7, 2]
+        seven_t2_cc <- max(seven_t2_cc)
+      }else{
+        seven_t2_cc <- 0
+      }
+      if(nrow(cif3_cc)>0){
+        
+        if(7 %in% cif3_cc[,1]){
+          seven_t3_cc <- cif3_cc[cif3_cc[,1] == 7, 2]
+        }else if(nrow(cif3_cc[cif3_cc[,1] <7,,drop = FALSE ]) > 0){
+          seven_t3_cc <- cif3_cc[cif3_cc[,1] < 7, 2]
+          seven_t3_cc <- max(seven_t3_cc)
+        }else{
+          seven_t3_cc <- 0
+        }
+      }else{
+        seven_t3_cc <- 0
+      }
+      seven_seq <- seq(7, 77, by = 7)
+      multi_7_t1_cc  <- cif1_cc[cif1_cc[,1] %in% seven_seq, 2]
+      multi_7_t2_cc  <- cif2_cc[cif2_cc[,1] %in% seven_seq, 2]
+      multi_7_t3_cc  <- cif3_cc[cif3_cc[,1] %in% seven_seq, 2]
+      
+      multi_7_t1_cc <- c(0, multi_7_t1_cc)
+      multi_7_t2_cc <- c(0, multi_7_t2_cc)
+      multi_7_t3_cc <- c(0, multi_7_t3_cc)
+      
+      multi_7_t1_cc <- multi_7_t1_cc[2:length(multi_7_t1_cc)] - multi_7_t1_cc[1:(length(multi_7_t1_cc) -1)]
+      multi_7_t2_cc <- multi_7_t2_cc[2:length(multi_7_t2_cc)] - multi_7_t1_cc[1:(length(multi_7_t2_cc) -1)]
+      multi_7_t3_cc <- multi_7_t3_cc[2:length(multi_7_t3_cc)] - multi_7_t1_cc[1:(length(multi_7_t3_cc) -1)]
+      
+      
+      
+      
+      cc_out_df$coeff[age_rows[1]] <- CI.agegrp1_t1_cc$coef
+      cc_out_df$variance[age_rows[1]] <- CI.agegrp1_t1_cc$var[1,1]
+      cc_out_df$day_7[age_rows[1]] <- seven_t1_cc
+      if(length(multi_7_t1_cc) > 0)
+        cc_out_df$mean_7[age_rows[1]] <- mean(multi_7_t1_cc)
+      else
+        cc_out_df$mean_7[age_rows[1]] <- seven_t1_cc
+      if(length(multi_7_t1_cc) > 0)
+        cc_out_df$median_7[age_rows[1]] <- median(multi_7_t1_cc)
+      else
+        cc_out_df$median_7[age_rows[1]] <- seven_t1_cc
+      
+      
+      
+      cc_out_df$coeff[age_rows[2]] <- CI.agegrp1_t2_cc$coef
+      cc_out_df$variance[age_rows[2]] <- CI.agegrp1_t2_cc$var[1,1]
+      cc_out_df$day_7[age_rows[2]] <- seven_t2_cc
+      if(length(multi_7_t2) > 0)
+        cc_out_df$mean_7[age_rows[2]] <- mean(multi_7_t2_cc)
+      else
+        cc_out_df$mean_7[age_rows[2]] <- seven_t2_cc
+      if(length(multi_7_t2) > 0)
+        cc_out_df$median_7[age_rows[2]] <- median(multi_7_t2_cc)
+      else
+        cc_out_df$median_7[age_rows[2]] <- seven_t2_cc
+      
+      
+      cc_out_df$coeff[age_rows[3]] <- CI.agegrp1_t3_cc$coef
+      cc_out_df$variance[age_rows[3]] <- CI.agegrp1_t3_cc$var[1,1]
+      cc_out_df$day_7[age_rows[3]] <- seven_t3_cc
+      if(length(multi_7_t3_cc) > 0)
+        cc_out_df$mean_7[age_rows[3]] <- mean(multi_7_t3_cc)
+      else
+        cc_out_df$mean_7[age_rows[3]] <- seven_t3_cc
+      if(length(multi_7_t3_cc) > 0)
+        cc_out_df$median_7[age_rows[3]] <- median(multi_7_t3_cc)
+      else
+        cc_out_df$median_7[age_rows[3]] <- seven_t3_cc
+      
+    
+    
+    }
+    
+    
+  }else{
   
   for(k in 1:3){
     print(paste("On GA age group:", k))
     agegrp1 <- subset(cohort1, subset = agegrp_v3 == k)
+    browser()
     
     
-    
-    crr_cluster <- snow::makeCluster(spec = 6, outfile = "D:/Overflows/crr_cluster_log.txt")
+    crr_cluster <- snow::makeCluster(spec = 6, outfile = "./crr_cluster_log.txt")
     crr_input <- snow::clusterSplit(crr_cluster, typies)
     
     snow::clusterExport(crr_cluster, "crr_cluster_run")
@@ -470,7 +774,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
     print(copy_end - copy_start)
     snow::clusterEvalQ(crr_cluster, require(cmprsk))
     snow::clusterEvalQ(crr_cluster, require(stringr))
-    snow::clusterEvalQ(crr_cluster, require(fastcmprsk))
+    snow::clusterEvalQ(crr_cluster, require(fastcmprsk, lib.loc = "C:/R-3.6.2/library"))
     print(paste("Running CRR jobs for age:", k))
     jobs_start <- Sys.time()
     crr_data_parallel <- snow::clusterApply(crr_cluster, crr_input,
@@ -478,29 +782,30 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
                                             cohort_data = agegrp1)
     snow::clusterEvalQ(crr_cluster, rm(agegrp1))
     snow::clusterEvalQ(crr_cluster, gc())
-    stopCluster(crr_cluster)
+    snow::stopCluster(crr_cluster)
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
     
     
-    CI.agegrp1_t1 <- crr_data_parallel[[1]]
-    CI.agegrp1_t2 <- crr_data_parallel[[2]]
-    CI.agegrp1_t3 <- crr_data_parallel[[3]]
+    CI.agegrp1_t1 <- crr_data_parallel[[1]][[1]]
+    CI.agegrp1_t2 <- crr_data_parallel[[2]][[1]]
+    CI.agegrp1_t3 <- crr_data_parallel[[3]][[1]]
     
-    CI.agegrp1_t1_cc <- crr_data_parallel[[4]]
-    CI.agegrp1_t2_cc <- crr_data_parallel[[5]]
-    CI.agegrp1_t3_cc <- crr_data_parallel[[6]]
+    CI.agegrp1_t1_cc <- crr_data_parallel[[4]][[1]]
+    CI.agegrp1_t2_cc <- crr_data_parallel[[5]][[1]]
+    CI.agegrp1_t3_cc <- crr_data_parallel[[6]][[1]]
     
+    browser()
     
     age_rows <- c((k*3) -2, (k*3) -1, (k*3))
     tic("Predicting trans 1")
-    cif1_pred <- predict(crr_data_parallel[[1]], newdata = 0, tL = 1)
+    cif1_pred <- crr_data_parallel[[1]][[2]]
     toc()
     tic("Predicting trans 2")
-    cif2_pred <- predict(crr_data_parallel[[2]], newdata = 0, tL = 1)
+    cif2_pred <- crr_data_parallel[[2]][[2]]
     toc()
     tic("Predicting trans 3")
-    cif3_pred <- predict(crr_data_parallel[[3]], newdata = 0, tL = 1)
+    cif3_pred <- crr_data_parallel[[3]][[2]]
     toc()
     
     cif1 <- cbind(cif1_pred$ftime, cif1_pred$CIF)
@@ -591,9 +896,9 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
     
     age_rows <- c((k*3) -2, (k*3) -1, (k*3))
     
-    cif1_cc <- predict.crr(crr_data_parallel[[4]], cov1 = 0)
-    cif2_cc <- predict.crr(crr_data_parallel[[5]], cov1 = 0)
-    cif3_cc <- predict.crr(crr_data_parallel[[6]], cov1 = 0)
+    cif1_cc <- crr_data_parallel[[4]][[2]]
+    cif2_cc <- crr_data_parallel[[5]][[2]]
+    cif3_cc <- crr_data_parallel[[6]][[2]]
     
     
     if(7 %in% cif1_cc[,1]){
@@ -683,6 +988,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
     
     
   }
+  }
   
   # run this one as an example because it takes less time than the above
   
@@ -692,20 +998,31 @@ cohort_1_competing_risk <- function(cohort1, current_ICD){
   return(list(out_df, cc_out_df))
 }
 
+make_elective_cohort_variable <- function(cohorts_data){
+  ## Making variable to run survival analysis on elective ICD groupings 
+  cohorts_data$elective_icd <- cohorts_data$MainICD10Cat
+  ## 50 for the elective grouping 
+  bundled_group <- c(16,5,8,17,1,15,4)
+  rows_bundles <- which(cohorts_data$elective_icd %in% bundled_group)
+  cohorts_data$elective_icd[rows_bundles] <- 50
+  
+  return(cohorts_data)
+  
+  
+}
 
-survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, single_icd  ){
+
+survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, single_icd, core_18 = FALSE){
   require(tidyverse)
   require(survival)
-  require(msSurv)
   require(plyr)
   require(timereg)
   require(ggplot2)
   require(ggpubr) ## need rtools installed for multi-plots
-  require(haven)
   require(dplyr)
   require(tictoc)
   require(cmprsk)
-  
+  require(fastcmprsk, lib.loc = "C:/R-3.6.2/library")
   
   # Import survival analysis data
   
@@ -732,7 +1049,7 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
     cohort12_failure_func <- failure_function(cohort23 = cohort12, csv_survial_name = failure_csv,
                                               pdf_to_export = failure_pdf)   
     cohort_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = single_icd, results_pdf = transitions_pdf)
-    cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = single_icd)
+    cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = single_icd, core_18 = core_18)
     
     failure_res <- cohort12_failure_func
     cohort_3_ga <- cohort_3_transitions[[2]]
@@ -743,7 +1060,7 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
   
   }else{
     cols_needed <- c("WaitingTime","Elective2Emergency","GA_LoS","ga_transitions",
-                     "agegrp_v3","cc_LoS","cc_transitions")
+                     "agegrp_v3","cc_LoS","cc_transitions","MainICD10Cat", "ICD")
     cols_to_keep <- which(colnames(cohorts_data) %in% cols_needed)
     
     cohort1 <- subset(cohorts_data, subset = cohort == 1)
@@ -751,8 +1068,51 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
     cohort3 <- subset(cohorts_data, subset = cohort == 3)
     cohort12 <- subset(cohorts_data, subset = cohort != 3)
     
-    cohort_1_icds <- plyr::count(cohort1$ICD)
-    cohort_3_icds <- plyr::count(cohort3$ICD)
+    cohort12 <- make_elective_cohort_variable(cohort12)
+    elective_groupings <- c(2,3,6,7,9,10,11,12,13,14,18,19,21,50)
+    emergency_groupings <- c(1,2,4,5,6,9,10,11,12,13,14,15,18,19,51)
+    
+    failure_res <- NULL
+    cohort_1_res_ga <- NULL
+    cohort_1_res_cc <- NULL
+    cohort_3_ga <- NULL
+    cohort_3_cc <- NULL
+    
+    for(k in 1:length(elective_groupings)){
+      current_icd <- elective_groupings[k]
+      cohort12_icd <- cohort12[cohort12$elective_icd == current_icd,]
+      cohort1_icd <- cohort1[cohort1$ICD == current_icd,]
+      
+      failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
+      failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
+      
+      
+      cohort12_failure_func <- failure_function(cohort23 = cohort12,
+                                                csv_survial_name = failure_csv,
+                                                pdf_to_export = failure_pdf)   
+      
+      failure_res <- rbind.data.frame(failure_res, cohort12_failure_func)
+      cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = current_icd,
+                                                     core_18 = core_18)
+      cohort_1_res_ga <- rbind.data.frame(cohort_1_res_ga, cohort1_transitions[[1]])
+      cohort_1_res_cc <- rbind.data.frame(cohort_1_res_cc, cohort1_transitions[[2]])
+      
+    }  
+    
+    for(k in 1:length(emergency_groupings)){
+      current_icd <- elective_groupings[k]
+      
+      transitions_pdf <- paste(base_dir, "/cohort_3_ICD",current_ICD,"_results.pdf", sep = "")
+      current_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = current_icd, results_pdf = transitions_pdf)
+      
+      cohort_3_ga <- rbind.data.frame(cohort_3_ga, current_3_transitions[[2]])
+      cohort_3_cc <- rbind.data.frame(cohort_3_cc, current_3_transitions[[4]])
+      
+      
+    }
+    
+    
+    
     
     
     

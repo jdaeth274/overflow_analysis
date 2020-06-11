@@ -14,26 +14,23 @@ require(KFAS)
 require(forecast)
 require(pryr)
 
+devtools::install_github("erickawaguchi/fastcmprsk",ref = "developer",
+                         lib="C:/R-3.6.2/library")
+
+
+require(fastcmprsk)
+
+
 setwd("E:/HES/COVID/")
 
-source(file = "C:/Users/dr314/Dropbox/COVID19/Overflow/Rscript/R/cohort_identification.R")
-source(file = "C:/Users/dr314/Dropbox/COVID19/Overflow/Rscript/R/transitions_coding.R")
-source(file = "C:/Users/dr314/Dropbox/COVID19/Overflow/Rscript/R/survival analysis.R")
-
-
-tesdt_df <- data.frame(matrix(ncol = 100, nrow = 1000, data = 100.9))
-
-for(k in 1:nrow(tesdt_df)){
-  current_val <- tesdt_df[k,1]
-  print(current_val)
-  
-}
-
-
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/cohort_identification.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/transitions_coding.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/survival analysis.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/time_series_creator.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/time_series_forecast.R")
 
 neos_one <- vroom(file = "./HES_APC_CC_0912_Neoplasms1.csv", delim = ",")
-
-
+subset_dat <- read.csv("./HES_APC_CC_0913_TEMP02_s1.csv", stringsAsFactors = FALSE)
 
 ## First step to load up HES dataset ##
 
@@ -43,18 +40,15 @@ hes_data <- vroom(input_args[1], delim = ",")
 
 
 cohort_allocation <- cohort_set_up(num_cores = 14,
-                                   data_loc = "E:/HES/COVID/HES_APC_CC_0912_Neoplasms1.csv")
+                                   data_loc = "E:/HES/COVID/HES_APC_CC_0913_TEMP02_s1.csv")
                                     
 transitions_data <- hes_transitions(cohort_allocation)
-system.time(save(transitions_data, file = "E:/HES/COVID/HES_APC_CC_09_13_Temp02_transitions.RData"))
-
-
 ## Just for neoplasms ##
 neos_transitions <- transitions_data[transitions_data$ICD == 2,]
 
 
-
-survival_res <- survival_analysis_set_up(transitions_data, single_ICD = TRUE, base_dir = "C:/Users/dr314/Dropbox/COVID19/Overflow/")
+survival_res <- survival_analysis_set_up(transitions_data, single_ICD = FALSE, base_dir = "D:/Dropbox/COVID19/Overflow/",
+                                         core_18 = FALSE)
 
 failure_func_df <- survival_res[[1]]
 emergency_ga <- survival_res[[2]]
