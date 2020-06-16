@@ -448,11 +448,17 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
 }
 
 
-forecast_clean <- function(df_out, cohort_num){
+forecast_clean <- function(df_out, cohort_num, transformed = FALSE){
   patient_groupings <- str_split_fixed(df_out$patient_group, "_", 3)
   df_out$cohort <- cohort_num
   df_out$age <- patient_groupings[,3]
   df_out$icd_name <- patient_groupings[,2]
+  
+  if(transformed){
+    df_out$median <- exp(df_out$median)
+    df_out$lower <- exp(df_out$lower)
+    df_out$upper <- exp(df_out$upper)
+  }
   
   
   return(df_out)
@@ -474,6 +480,12 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_3_plots <- paste(base_dir,"cohort_3_admissions_and_frail.pdf", sep = "")
   cohort_1_med_plot <- paste(base_dir, "cohort_1_pool_and_median_WT.pdf",sep = "")
   cohort_1_med_plot <- paste(base_dir, "cohort_1_frail_and_mean_WT.pdf",sep = "")
+  
+  cohort1_med_nonzero <- which(cohort_1_ts_admissions$p50_WT_ICDc != 0)
+  cohort1_mean_nonzero <- which(cohort_1_ts_admissions$mean_WT_ICDc != 0)
+  
+  cohort_1_ts_admissions$p50_WT_ICDc[cohort1_med_nonzero] <- log(cohort_1_ts_admissions$p50_WT_ICDc[cohort1_med_nonzero])
+  cohort_1_ts_admissions$mean_WT_ICDc[cohort1_mean_nonzero] <- log(cohort_1_ts_admissions$mean_WT_ICDc[cohort1_mean_nonzero])
   
   test_cohort_3 <- forecast_function(cohort_3_ts, results_name = cohort_3_plots,
                                      forecast_admissions = TRUE, diagnostics_only = FALSE, forecast_frail = TRUE,

@@ -23,8 +23,9 @@ make_wt_variable <- function(elective_df){
 
 
 
-failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies_survival_plot",
-                             csv_survial_name){
+failure_function <- function(cohort23,csv_survial_name,
+                             pdf_to_export = "electives_to_emergencies_survival_plot",
+                             current_ICD){
   ## Need to double check whether Waiting time is in there!
   start_time <- Sys.time()
   print("Failure function for electives to emergencies")
@@ -57,7 +58,6 @@ failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies
   
   # 1.4 Put failure function and standard errors into a df --> export to csv
   #### This needs to be in the correct dir, from the setwd from above ####
-  csv_survival_name <- paste("survival_electives_to_emergencies_ICD",as.character(2),".csv",sep = "")
   
   pdf(file = pdf_to_export, paper = "a4r")
   
@@ -67,13 +67,59 @@ failure_function <- function(cohort23, pdf_to_export = "electives_to_emergencies
   dev.off()
   
   write.csv(survival_df,
-            file = csv_survival_name,
+              file = csv_survial_name,
             row.names = FALSE)
+  
+  ## get the 7 day multiples ##
+  
+  out_df <- data.frame(matrix(ncol = 5, nrow = 3))
+  colnames(out_df) <- c("age","ICD","day_7","mean_7","median_7")
+  out_df$age <- c("<25","25-64","65+")
+  out_df$ICD <- current_ICD
+  
+  for(k in 1:3){
+    
+    ## get day 7 vals first 
+    day_7s <- survival_df[survival_df$time == 7 &
+                            survival_df$age == out_df$age[k],]
+    if(nrow(day_7s) == 1){
+      out_df$day_7[k] <- day_7s$cumulative_hazard
+    }else{
+      day_7s <- survival_df[survival_df$time < 7 &
+                                  survival_df$age == out_df$age[k],]
+      if(nrow(day_7s) == 0){
+        out_df$day_7[k] <- 0
+      }else{
+        out_df$day_7[k] <- max(day_7s$cumulative_hazard)
+      }
+      
+    }
+    ## now multiples 
+    seven_mults <- seq(7, max(survival_df$time), by = 7)
+    
+    multi_df <- out_df$day_7[k]
+    
+    for(j in 2:length(seven_mults)){
+      current_mult_vals <- survival_df[survival_df$time > seven_mults[k-1] &
+                                         survival_df$time <= seven_mults[k],]
+      if(nrow(current_mult_vals) == 0){
+        multi_df <- append(multi_df, 0)
+      }else{
+        diff_val <- max(current_mult_vals$cumulative_hazard) - multi_df[length(multi_df)]
+        multi_df <- append(multi_df, diff_val)
+      }
+      
+    }
+    
+    out_df$mean_7[k] <- mean(multi_df)
+    out_df$median_7[k] <- median(multi_df)
+    
+  }
   
   end_time <- Sys.time()
   print(end_time - start_time)
   
-  return(survival_df)
+  return(list(survival_df, out_df))
 
 }
 ###########################################################################################################################
@@ -399,11 +445,17 @@ crr_cluster_run <- function(fail_type, cohort_data){
         agegrp_3_2_WT <- cohort_data$WaitingTime
         
         na_tims <- which(is.na(agegrp_3_2_time))
-        agegrp_3_2_time <- agegrp_3_2_time[-na_tims]
-        agegrp_3_2_trans <- agegrp_3_2_trans[-na_tims]
-        agegrp_3_2_WT <- agegrp_3_2_WT[-na_tims]
+        if(length(na_tims) > 0){
+          agegrp_3_2_time <- agegrp_3_2_time[-na_tims]
+          agegrp_3_2_trans <- agegrp_3_2_trans[-na_tims]
+          agegrp_3_2_WT <- agegrp_3_2_WT[-na_tims]
+        }
         old_na <- which(is.na(agegrp_3_2_trans))
-        agegrp_3_2_trans[old_na] <- 0
+        if(length(old_na) > 0){
+          agegrp_3_2_time <- agegrp_3_2_time[-old_na]
+          agegrp_3_2_trans <- agegrp_3_2_trans[-old_na]
+          agegrp_3_2_WT <- agegrp_3_2_WT[-old_na]
+        }
         if(current_fail != 1){
           old_2ers <- which(agegrp_3_2_trans == current_fail)
           old_1ers <- which(agegrp_3_2_trans == 1)
@@ -449,11 +501,17 @@ crr_cluster_run_18 <- function(fail_type, cohort_data){
     agegrp_3_2_WT <- cohort_data$WaitingTime
     
     na_tims <- which(is.na(agegrp_3_2_time))
-    agegrp_3_2_time <- agegrp_3_2_time[-na_tims]
-    agegrp_3_2_trans <- agegrp_3_2_trans[-na_tims]
-    agegrp_3_2_WT <- agegrp_3_2_WT[-na_tims]
+    if(length(na_tims) > 0){
+      agegrp_3_2_time <- agegrp_3_2_time[-na_tims]
+      agegrp_3_2_trans <- agegrp_3_2_trans[-na_tims]
+      agegrp_3_2_WT <- agegrp_3_2_WT[-na_tims]
+    }
     old_na <- which(is.na(agegrp_3_2_trans))
-    agegrp_3_2_trans[old_na] <- 0
+    if(length(old_na) > 0){
+      agegrp_3_2_time <- agegrp_3_2_time[-old_na]
+      agegrp_3_2_trans <- agegrp_3_2_trans[-old_na]
+      agegrp_3_2_WT <- agegrp_3_2_WT[-old_na]
+    }
     if(current_fail != 1){
       old_2ers <- which(agegrp_3_2_trans == current_fail)
       old_1ers <- which(agegrp_3_2_trans == 1)
@@ -469,8 +527,8 @@ crr_cluster_run_18 <- function(fail_type, cohort_data){
     
     # cif1_pred <- predict(CI.agegrp1_t1, newdata = 0, tL = 1)
     # cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF)
-    cif1_pred <- fastcmprsk:::predict.fcrr(CI.agegrp1_t1, newdata = 0, tL = 1)
-    cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF)
+    cif1_pred <- fastcmprsk:::predict.fcrr(CI.agegrp1_t1, newdata = 0, tL = 1, type = "interval")
+    cif1_pred <- cbind(cif1_pred$ftime, cif1_pred$CIF, cif1_pred$lower, cif1_pred$upper )
     
   }else if(current_type == "cc"){
     CI.agegrp1_t1 <- crr(ftime = cohort_data$cc_LoS, fstatus = cohort_data$cc_transitions,
@@ -551,7 +609,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
     
     
     for(k in 1:3){
-      agieos <- seq(((k*6) - 5), K*6)
+      agieos <- seq(((k*6) - 5), k*6)
       
       CI.agegrp1_t1 <- crr_data_parallel[[agieos[1]]][[1]]
       CI.agegrp1_t2 <- crr_data_parallel[[agieos[2]]][[1]]
@@ -603,60 +661,52 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
         seven_t3 <- 0
       }
       
-      seven_seq <- seq(7, 77, by = 7)
-      multi_7_t1  <- cif1[cif1[,1] %in% seven_seq, 2]
-      multi_7_t2  <- cif2[cif2[,1] %in% seven_seq, 2]
-      multi_7_t3  <- cif3[cif3[,1] %in% seven_seq, 2]
       
-      multi_7_t1 <- c(0, multi_7_t1)
-      multi_7_t2 <- c(0, multi_7_t2)
-      multi_7_t3 <- c(0, multi_7_t3)
+      max_time <- max(c(cif1[,1], cif2[,1], cif3[,1]))
+      seven_mults <- seq(7, max_time, by = 7)
+      start_sevens <- c(seven_t1, sevent_t2,seven_t3)
+      cifs <- list(cif1, cif2, cif3)
+      multi_outs <- data.frame(matrix(ncol = 3, nrow = length(seven_mults)))
       
-      multi_7_t1 <- multi_7_t1[2:length(multi_7_t1)] - multi_7_t1[1:(length(multi_7_t1) -1)]
-      multi_7_t2 <- multi_7_t2[2:length(multi_7_t2)] - multi_7_t1[1:(length(multi_7_t2) -1)]
-      multi_7_t3 <- multi_7_t3[2:length(multi_7_t3)] - multi_7_t1[1:(length(multi_7_t3) -1)]
+      for(trans in 1:3){
       
+        multi_df <- start_sevens[trans]
+        
+        for(j in 2:length(seven_mults)){
+          current_mult_vals <- cifs[[trans]][cifs[[trans]][,1] > seven_mults[k-1] &
+                                               cifs[[trans]][,1] <= seven_mults[k],]
+          if(nrow(current_mult_vals) == 0){
+            multi_df <- append(multi_df, 0)
+          }else{
+            diff_val <- max(current_mult_vals$cumulative_hazard) - multi_df[length(multi_df)]
+            multi_df <- append(multi_df, diff_val)
+          }
+          
+        }
+        
+        multi_outs[,k] <- multi_df
       
+      }
       
-      
+
       out_df$coeff[age_rows[1]] <- crr_data_parallel[[1]]$coef
       out_df$variance[age_rows[1]] <- crr_data_parallel[[1]]$var[1,1]
       out_df$day_7[age_rows[1]] <- seven_t1
-      if(length(multi_7_t1) > 0)
-        out_df$mean_7[age_rows[1]] <- mean(multi_7_t1)
-      else
-        out_df$mean_7[age_rows[1]] <- seven_t1
-      if(length(multi_7_t1) > 0)
-        out_df$median_7[age_rows[1]] <- median(multi_7_t1)
-      else
-        out_df$median_7[age_rows[1]] <- seven_t1
-      
-      
+      out_df$mean_7[age_rows[1]] <- mean(multi_outs[,1])
+      out_df$median_7[age_rows[1]] <- median(multi_outs[,1])
       
       out_df$coeff[age_rows[2]] <- crr_data_parallel[[2]]$coef
       out_df$variance[age_rows[2]] <- crr_data_parallel[[2]]$var[1,1]
       out_df$day_7[age_rows[2]] <- seven_t2
-      if(length(multi_7_t2) > 0)
-        out_df$mean_7[age_rows[2]] <- mean(multi_7_t2)
-      else
-        out_df$mean_7[age_rows[2]] <- seven_t2
-      if(length(multi_7_t2) > 0)
-        out_df$median_7[age_rows[2]] <- median(multi_7_t2)
-      else
-        out_df$median_7[age_rows[2]] <- seven_t2
+      out_df$mean_7[age_rows[2]] <- mean(multi_outs[,2])
+      out_df$median_7[age_rows[2]] <- median(multi_outs[,2])
       
       
       out_df$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
       out_df$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
       out_df$day_7[age_rows[3]] <- seven_t3
-      if(length(multi_7_t3) > 0)
-        out_df$mean_7[age_rows[3]] <- mean(multi_7_t3)
-      else
-        out_df$mean_7[age_rows[3]] <- seven_t3
-      if(length(multi_7_t3) > 0)
-        out_df$median_7[age_rows[3]] <- median(multi_7_t3)
-      else
-        out_df$median_7[age_rows[3]] <- seven_t3
+      out_df$mean_7[age_rows[3]] <- mean(multi_outs[,2])
+      out_df$median_7[age_rows[3]] <- median(multi_outs[,3])
       
       
       age_rows <- c((k*3) -2, (k*3) -1, (k*3))
@@ -695,60 +745,55 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
       }else{
         seven_t3_cc <- 0
       }
-      seven_seq <- seq(7, 77, by = 7)
-      multi_7_t1_cc  <- cif1_cc[cif1_cc[,1] %in% seven_seq, 2]
-      multi_7_t2_cc  <- cif2_cc[cif2_cc[,1] %in% seven_seq, 2]
-      multi_7_t3_cc  <- cif3_cc[cif3_cc[,1] %in% seven_seq, 2]
       
-      multi_7_t1_cc <- c(0, multi_7_t1_cc)
-      multi_7_t2_cc <- c(0, multi_7_t2_cc)
-      multi_7_t3_cc <- c(0, multi_7_t3_cc)
+      max_time <- max(c(cif1_cc[,1], cif2_cc[,1], cif3_cc[,1]))
       
-      multi_7_t1_cc <- multi_7_t1_cc[2:length(multi_7_t1_cc)] - multi_7_t1_cc[1:(length(multi_7_t1_cc) -1)]
-      multi_7_t2_cc <- multi_7_t2_cc[2:length(multi_7_t2_cc)] - multi_7_t1_cc[1:(length(multi_7_t2_cc) -1)]
-      multi_7_t3_cc <- multi_7_t3_cc[2:length(multi_7_t3_cc)] - multi_7_t1_cc[1:(length(multi_7_t3_cc) -1)]
+      seven_mults <- seq(7, max_time, by = 7)
+      start_sevens <- c(seven_t1_cc, sevent_t2_cc,seven_t3_cc)
+      cifs <- list(cif1_cc, cif2_cc, cif3_cc)
+      multi_outs <- data.frame(matrix(ncol = 3, nrow = length(seven_mults)))
       
+      for(trans in 1:3){
+        
+        multi_df <- start_sevens[trans]
+        
+        for(j in 2:length(seven_mults)){
+          current_mult_vals <- cifs[[trans]][cifs[[trans]][,1] > seven_mults[k-1] &
+                                               cifs[[trans]][,1] <= seven_mults[k],]
+          if(nrow(current_mult_vals) == 0){
+            multi_df <- append(multi_df, 0)
+          }else{
+            diff_val <- max(current_mult_vals$cumulative_hazard) - multi_df[length(multi_df)]
+            multi_df <- append(multi_df, diff_val)
+          }
+          
+        }
+        
+        multi_outs[,k] <- multi_df
+        
+      }
       
+
       
       
       cc_out_df$coeff[age_rows[1]] <- CI.agegrp1_t1_cc$coef
       cc_out_df$variance[age_rows[1]] <- CI.agegrp1_t1_cc$var[1,1]
       cc_out_df$day_7[age_rows[1]] <- seven_t1_cc
-      if(length(multi_7_t1_cc) > 0)
-        cc_out_df$mean_7[age_rows[1]] <- mean(multi_7_t1_cc)
-      else
-        cc_out_df$mean_7[age_rows[1]] <- seven_t1_cc
-      if(length(multi_7_t1_cc) > 0)
-        cc_out_df$median_7[age_rows[1]] <- median(multi_7_t1_cc)
-      else
-        cc_out_df$median_7[age_rows[1]] <- seven_t1_cc
-      
-      
+      cc_out_df$mean_7[age_rows[1]] <- mean(multi_outs[,1])
+      cc_out_df$median_7[age_rows[1]] <- median(multi_outs[,1])
       
       cc_out_df$coeff[age_rows[2]] <- CI.agegrp1_t2_cc$coef
       cc_out_df$variance[age_rows[2]] <- CI.agegrp1_t2_cc$var[1,1]
       cc_out_df$day_7[age_rows[2]] <- seven_t2_cc
-      if(length(multi_7_t2) > 0)
-        cc_out_df$mean_7[age_rows[2]] <- mean(multi_7_t2_cc)
-      else
-        cc_out_df$mean_7[age_rows[2]] <- seven_t2_cc
-      if(length(multi_7_t2) > 0)
-        cc_out_df$median_7[age_rows[2]] <- median(multi_7_t2_cc)
-      else
-        cc_out_df$median_7[age_rows[2]] <- seven_t2_cc
+      cc_out_df$mean_7[age_rows[2]] <- mean(multi_outs[,2])
+      cc_out_df$median_7[age_rows[2]] <- median(multi_outs[,2])
       
       
       cc_out_df$coeff[age_rows[3]] <- CI.agegrp1_t3_cc$coef
       cc_out_df$variance[age_rows[3]] <- CI.agegrp1_t3_cc$var[1,1]
       cc_out_df$day_7[age_rows[3]] <- seven_t3_cc
-      if(length(multi_7_t3_cc) > 0)
-        cc_out_df$mean_7[age_rows[3]] <- mean(multi_7_t3_cc)
-      else
-        cc_out_df$mean_7[age_rows[3]] <- seven_t3_cc
-      if(length(multi_7_t3_cc) > 0)
-        cc_out_df$median_7[age_rows[3]] <- median(multi_7_t3_cc)
-      else
-        cc_out_df$median_7[age_rows[3]] <- seven_t3_cc
+      cc_out_df$mean_7[age_rows[3]] <- mean(multi_outs[,3])
+      cc_out_df$median_7[age_rows[3]] <- median(multi_outs[,3])
       
     
     
@@ -760,7 +805,7 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
   for(k in 1:3){
     print(paste("On GA age group:", k))
     agegrp1 <- subset(cohort1, subset = agegrp_v3 == k)
-    browser()
+    
     
     
     crr_cluster <- snow::makeCluster(spec = 6, outfile = "./crr_cluster_log.txt")
@@ -838,60 +883,53 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
       seven_t3 <- 0
     }
     
-    seven_seq <- seq(7, 77, by = 7)
-    multi_7_t1  <- cif1[cif1[,1] %in% seven_seq, 2]
-    multi_7_t2  <- cif2[cif2[,1] %in% seven_seq, 2]
-    multi_7_t3  <- cif3[cif3[,1] %in% seven_seq, 2]
+    max_time <- max(c(cif1[,1], cif2[,1], cif3[,1]))
+    seven_mults <- seq(7, max_time, by = 7)
+    start_sevens <- c(seven_t1, sevent_t2,seven_t3)
+    cifs <- list(cif1, cif2, cif3)
+    multi_outs <- data.frame(matrix(ncol = 3, nrow = length(seven_mults)))
     
-    multi_7_t1 <- c(0, multi_7_t1)
-    multi_7_t2 <- c(0, multi_7_t2)
-    multi_7_t3 <- c(0, multi_7_t3)
-    
-    multi_7_t1 <- multi_7_t1[2:length(multi_7_t1)] - multi_7_t1[1:(length(multi_7_t1) -1)]
-    multi_7_t2 <- multi_7_t2[2:length(multi_7_t2)] - multi_7_t1[1:(length(multi_7_t2) -1)]
-    multi_7_t3 <- multi_7_t3[2:length(multi_7_t3)] - multi_7_t1[1:(length(multi_7_t3) -1)]
-    
-    
+    for(trans in 1:3){
+      
+      multi_df <- start_sevens[trans]
+      
+      for(j in 2:length(seven_mults)){
+        current_mult_vals <- cifs[[trans]][cifs[[trans]][,1] > seven_mults[k-1] &
+                                             cifs[[trans]][,1] <= seven_mults[k],]
+        if(nrow(current_mult_vals) == 0){
+          multi_df <- append(multi_df, 0)
+        }else{
+          diff_val <- max(current_mult_vals$cumulative_hazard) - multi_df[length(multi_df)]
+          multi_df <- append(multi_df, diff_val)
+        }
+        
+      }
+      
+      multi_outs[,k] <- multi_df
+      
+    }
     
     
     out_df$coeff[age_rows[1]] <- crr_data_parallel[[1]]$coef
     out_df$variance[age_rows[1]] <- crr_data_parallel[[1]]$var[1,1]
     out_df$day_7[age_rows[1]] <- seven_t1
-    if(length(multi_7_t1) > 0)
-      out_df$mean_7[age_rows[1]] <- mean(multi_7_t1)
-    else
-      out_df$mean_7[age_rows[1]] <- seven_t1
-    if(length(multi_7_t1) > 0)
-      out_df$median_7[age_rows[1]] <- median(multi_7_t1)
-    else
-      out_df$median_7[age_rows[1]] <- seven_t1
+    out_df$mean_7[age_rows[1]] <- mean(multi_outs[,1])
+    out_df$median_7[age_rows[1]] <- median(multi_outs[,1])
     
     
     
     out_df$coeff[age_rows[2]] <- crr_data_parallel[[2]]$coef
     out_df$variance[age_rows[2]] <- crr_data_parallel[[2]]$var[1,1]
     out_df$day_7[age_rows[2]] <- seven_t2
-    if(length(multi_7_t2) > 0)
-      out_df$mean_7[age_rows[2]] <- mean(multi_7_t2)
-    else
-      out_df$mean_7[age_rows[2]] <- seven_t2
-    if(length(multi_7_t2) > 0)
-      out_df$median_7[age_rows[2]] <- median(multi_7_t2)
-    else
-      out_df$median_7[age_rows[2]] <- seven_t2
+    out_df$mean_7[age_rows[2]] <- mean(multi_outs[,2])
+    out_df$median_7[age_rows[2]] <- median(multi_outs[,2])
     
     
     out_df$coeff[age_rows[3]] <- CI.agegrp1_t3$coef
     out_df$variance[age_rows[3]] <- CI.agegrp1_t3$var[1,1]
     out_df$day_7[age_rows[3]] <- seven_t3
-    if(length(multi_7_t3) > 0)
-      out_df$mean_7[age_rows[3]] <- mean(multi_7_t3)
-    else
-      out_df$mean_7[age_rows[3]] <- seven_t3
-    if(length(multi_7_t3) > 0)
-      out_df$median_7[age_rows[3]] <- median(multi_7_t3)
-    else
-      out_df$median_7[age_rows[3]] <- seven_t3
+    out_df$mean_7[age_rows[3]] <- mean(multi_outs[,3])
+    out_df$median_7[age_rows[3]] <- median(multi_outs[,3])
     
     
     age_rows <- c((k*3) -2, (k*3) -1, (k*3))
@@ -930,18 +968,32 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
     }else{
       seven_t3_cc <- 0
     }
-    seven_seq <- seq(7, 77, by = 7)
-    multi_7_t1_cc  <- cif1_cc[cif1_cc[,1] %in% seven_seq, 2]
-    multi_7_t2_cc  <- cif2_cc[cif2_cc[,1] %in% seven_seq, 2]
-    multi_7_t3_cc  <- cif3_cc[cif3_cc[,1] %in% seven_seq, 2]
+    max_time <- max(c(cif1_cc[,1], cif2_cc[,1], cif3_cc[,1]))
     
-    multi_7_t1_cc <- c(0, multi_7_t1_cc)
-    multi_7_t2_cc <- c(0, multi_7_t2_cc)
-    multi_7_t3_cc <- c(0, multi_7_t3_cc)
+    seven_mults <- seq(7, max_time, by = 7)
+    start_sevens <- c(seven_t1_cc, sevent_t2_cc,seven_t3_cc)
+    cifs <- list(cif1_cc, cif2_cc, cif3_cc)
+    multi_outs <- data.frame(matrix(ncol = 3, nrow = length(seven_mults)))
     
-    multi_7_t1_cc <- multi_7_t1_cc[2:length(multi_7_t1_cc)] - multi_7_t1_cc[1:(length(multi_7_t1_cc) -1)]
-    multi_7_t2_cc <- multi_7_t2_cc[2:length(multi_7_t2_cc)] - multi_7_t1_cc[1:(length(multi_7_t2_cc) -1)]
-    multi_7_t3_cc <- multi_7_t3_cc[2:length(multi_7_t3_cc)] - multi_7_t1_cc[1:(length(multi_7_t3_cc) -1)]
+    for(trans in 1:3){
+      
+      multi_df <- start_sevens[trans]
+      
+      for(j in 2:length(seven_mults)){
+        current_mult_vals <- cifs[[trans]][cifs[[trans]][,1] > seven_mults[k-1] &
+                                             cifs[[trans]][,1] <= seven_mults[k],]
+        if(nrow(current_mult_vals) == 0){
+          multi_df <- append(multi_df, 0)
+        }else{
+          diff_val <- max(current_mult_vals$cumulative_hazard) - multi_df[length(multi_df)]
+          multi_df <- append(multi_df, diff_val)
+        }
+        
+      }
+      
+      multi_outs[,k] <- multi_df
+      
+    }
     
     
     
@@ -949,41 +1001,21 @@ cohort_1_competing_risk <- function(cohort1, current_ICD,core_18 = FALSE){
     cc_out_df$coeff[age_rows[1]] <- CI.agegrp1_t1_cc$coef
     cc_out_df$variance[age_rows[1]] <- CI.agegrp1_t1_cc$var[1,1]
     cc_out_df$day_7[age_rows[1]] <- seven_t1_cc
-    if(length(multi_7_t1_cc) > 0)
-      cc_out_df$mean_7[age_rows[1]] <- mean(multi_7_t1_cc)
-    else
-      cc_out_df$mean_7[age_rows[1]] <- seven_t1_cc
-    if(length(multi_7_t1_cc) > 0)
-      cc_out_df$median_7[age_rows[1]] <- median(multi_7_t1_cc)
-    else
-      cc_out_df$median_7[age_rows[1]] <- seven_t1_cc
-    
-    
+    cc_out_df$mean_7[age_rows[1]] <- mean(multi_outs[,1])
+    cc_out_df$median_7[age_rows[1]] <- median(multi_outs[,1])
     
     cc_out_df$coeff[age_rows[2]] <- CI.agegrp1_t2_cc$coef
     cc_out_df$variance[age_rows[2]] <- CI.agegrp1_t2_cc$var[1,1]
     cc_out_df$day_7[age_rows[2]] <- seven_t2_cc
-    if(length(multi_7_t2) > 0)
-      cc_out_df$mean_7[age_rows[2]] <- mean(multi_7_t2_cc)
-    else
-      cc_out_df$mean_7[age_rows[2]] <- seven_t2_cc
-    if(length(multi_7_t2) > 0)
-      cc_out_df$median_7[age_rows[2]] <- median(multi_7_t2_cc)
-    else
-      cc_out_df$median_7[age_rows[2]] <- seven_t2_cc
+    cc_out_df$mean_7[age_rows[2]] <- mean(multi_outs[,2])
+    cc_out_df$median_7[age_rows[2]] <- median(multi_outs[,2])
     
     
     cc_out_df$coeff[age_rows[3]] <- CI.agegrp1_t3_cc$coef
     cc_out_df$variance[age_rows[3]] <- CI.agegrp1_t3_cc$var[1,1]
     cc_out_df$day_7[age_rows[3]] <- seven_t3_cc
-    if(length(multi_7_t3_cc) > 0)
-      cc_out_df$mean_7[age_rows[3]] <- mean(multi_7_t3_cc)
-    else
-      cc_out_df$mean_7[age_rows[3]] <- seven_t3_cc
-    if(length(multi_7_t3_cc) > 0)
-      cc_out_df$median_7[age_rows[3]] <- median(multi_7_t3_cc)
-    else
-      cc_out_df$median_7[age_rows[3]] <- seven_t3_cc
+    cc_out_df$mean_7[age_rows[3]] <- mean(multi_outs[,3])
+    cc_out_df$median_7[age_rows[3]] <- median(multi_outs[,3])
     
     
     
@@ -1009,6 +1041,99 @@ make_elective_cohort_variable <- function(cohorts_data){
   return(cohorts_data)
   
   
+}
+
+
+failure_func_try <- function(cohort23, csv_survival_name, pdf_to_export, current_ICD){
+  browser()
+  out <- tryCatch({
+    message("Trying out the failure function")
+    
+    failure_function(cohort23 = cohort23, csv_survial_name = csv_survival_name,
+                     pdf_to_export = pdf_to_export, 
+                     current_ICD = current_ICD)   
+  },
+  error = function(cond){
+    message(paste("Cohort 1 to 2 failure function not working for ICD:", current_ICD))
+    message(cond)
+    return(NULL)
+  },
+  warning = function(cond){
+    message(paste("Following warning message for ICD:", current_ICD))
+    message(cond)
+    return(out)
+    
+  },
+  finally = {
+    message(paste("Processed cohort 1 to 2 for ICD:", current_ICD))
+  }
+    
+ 
+  )
+  
+  
+  return(out)
+}
+
+crr_func_try <- function(cohort1 , current_ICD ,
+                         core_18){
+  out <- tryCatch({
+    message("Trying out the CRR function")
+    cohort_1_competing_risk(cohort1 = cohort1 , current_ICD = current_ICD,
+                            core_18 = core_18)  
+    
+  },
+  error = function(cond){
+    message(paste("Cohort 1 CRR not working for ICD:", current_ICD))
+    message(cond)
+    return(NULL)
+  },
+  warning = function(cond){
+    message(paste("Following warning message for ICD:", current_ICD))
+    message(cond)
+    return(out)
+    
+  },
+  finally = {
+    message(paste("Processed cohort 1 CRR for ICD:", current_ICD))
+  }
+  
+  
+  )
+  
+  
+  return(out)
+}
+
+
+cohort_3_func_try <- function(cohort3, ICD_group, results_pdf){
+  out <- tryCatch({
+    message("Trying out the failure function")
+    
+    cohort_3_comp_risks(cohort1 = cohort3,
+                        ICD_group = current_icd,
+                        results_pdf = transitions_pdf)   
+  },
+  error = function(cond){
+    message(paste("Cohort 3 competing risk not working for ICD:", current_ICD))
+    message(cond)
+    return(NULL)
+  },
+  warning = function(cond){
+    message(paste("Following warning message for ICD:", current_ICD))
+    message(cond)
+    return(out)
+    
+  },
+  finally = {
+    message(paste("Processed Cohort 3 competing risks for ICD:", current_ICD))
+  }
+  
+  
+  )
+  
+  
+  return(out)
 }
 
 
@@ -1047,7 +1172,7 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
     transitions_pdf <- paste(base_dir, "/one_ICD_results.pdf", sep = "")
     
     cohort12_failure_func <- failure_function(cohort23 = cohort12, csv_survial_name = failure_csv,
-                                              pdf_to_export = failure_pdf)   
+                                              pdf_to_export = failure_pdf, current_ICD = single_icd)   
     cohort_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = single_icd, results_pdf = transitions_pdf)
     cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = single_icd, core_18 = core_18)
     
@@ -1079,6 +1204,7 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
     cohort_3_cc <- NULL
     
     for(k in 1:length(elective_groupings)){
+      
       current_icd <- elective_groupings[k]
       cohort12_icd <- cohort12[cohort12$elective_icd == current_icd,]
       cohort1_icd <- cohort1[cohort1$ICD == current_icd,]
@@ -1086,23 +1212,32 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
       failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
       failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
       
+      ## try catch for survival analysis 
+      ## failure function 
       
-      cohort12_failure_func <- failure_function(cohort23 = cohort12,
-                                                csv_survial_name = failure_csv,
-                                                pdf_to_export = failure_pdf)   
       
-      failure_res <- rbind.data.frame(failure_res, cohort12_failure_func)
-      cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = current_icd,
+      cohort12_failure_func <- failure_func_try(cohort23 =  cohort12,
+                                                csv_survival_name = failure_csv,
+                                                pdf_to_export = failure_pdf, current_ICD = current_icd)   
+      
+      if(length(cohort12_failure_func) != 0){
+        failure_res <- rbind.data.frame(failure_res, cohort12_failure_func[[2]])
+      }
+      
+      cohort1_transitions <- crr_func_try(cohort1 = cohort1_icd , current_ICD = current_icd,
                                                      core_18 = core_18)
-      cohort_1_res_ga <- rbind.data.frame(cohort_1_res_ga, cohort1_transitions[[1]])
-      cohort_1_res_cc <- rbind.data.frame(cohort_1_res_cc, cohort1_transitions[[2]])
-      
+      if(length(cohort12_failure_func) != 0){
+        cohort_1_res_ga <- rbind.data.frame(cohort_1_res_ga, cohort1_transitions[[1]])
+        cohort_1_res_cc <- rbind.data.frame(cohort_1_res_cc, cohort1_transitions[[2]])
+      }
     }  
     
     for(k in 1:length(emergency_groupings)){
       current_icd <- elective_groupings[k]
       
       transitions_pdf <- paste(base_dir, "/cohort_3_ICD",current_ICD,"_results.pdf", sep = "")
+      
+      
       current_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = current_icd, results_pdf = transitions_pdf)
       
       cohort_3_ga <- rbind.data.frame(cohort_3_ga, current_3_transitions[[2]])
@@ -1111,13 +1246,7 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
       
     }
     
-    
-    
-    
-    
-    
-    
-    
+  
     
   }
   

@@ -84,6 +84,9 @@ emergency_df_ts <- function(out_indies, Emergency_out_df, emergencies_only){
   return(emergency_out_Df)
 }
 
+
+
+
 running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   current_env <- environment(running_emergencies_ts_in_parallel)
   
@@ -123,7 +126,7 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   emergency_rows <- seq(1, nrows_df)
   tic("CLuster_Set_up")
   print("Setting up the parallel jobs")
-  cluster_function <- snow::makeCluster(spec = num_cores, outfile = "D:/Overflows/ts_creat_log.txt")
+  cluster_function <- snow::makeCluster(spec = num_cores, outfile = "./ts_creat_log.txt")
   function_input <- snow::clusterSplit(cluster_function, emergency_rows)
   toc()
   tic("Function copy")
@@ -317,8 +320,36 @@ remove_wt_outliers <- function(ts_electives){
 }
 
 
+waiting_pool <- function(current_icd, hes_data, end_date){
+  ## This function produces our waiting pool, designed to be run with lapply
+  
+  current_hes <- hes_data[hes_data$ICD == current_icd,]
+  
+  out_df <- data.frame(matrix(ncol = 5,nrow = 3))
+  colnames(out_df) <- c("age","icd","pool","median_WT","mean_WT")
+  out_df$age <- c("<25","25-64", "65+")
+  out_df$icd <- current_icd
+  
+  
+  for(age in 1:3){
+  
+    age_1 <- current_hes[current_hes$agegrp_v3 == age &
+                           current_hes$rttstart < end_date &
+                           current_hes$admidate_MDY >= end_date,]
+    out_df$pool[age] <- nrow(age_1)
+    if(nrow(age_1) > 0){
+      out_df$median_WT[age] <- median(age_1$WaitingTime, na.rm = TRUE)
+      out_df$mean_WT[age] <- mean(age_1$WaitingTime, na.rm = TRUE)
+    }
+  
+  }
 
-running_elective_ts_in_parallel <- function(hes_data, num_cores){
+  
+  return(out_df)
+}
+
+
+running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date){
 
     time_start <- Sys.time()
   electives_only <- hes_data[hes_data$cohort == 1,]
@@ -351,8 +382,6 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores){
   num_icd <- length(icds)
   num_ages <- 3
   nrows_df <- num_weeks * num_ages * num_icd
-  print(paste("Num weeks:", num_weeks))
-  print(paste("Num icd:", icds))
   
   elective_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 8))
   colnames(elective_out_Df) <- c("rttstart_YYYY","rttstart_week",
@@ -368,7 +397,7 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores){
   print("Creating parallel jobs")
   print(nrows_df)
   elective_rows <- seq(1, nrows_df)
-  cluster_function <- snow::makeCluster(spec = num_cores,  outfile = "D:/Overflows/cluster_log_file_TS.txt")
+  cluster_function <- snow::makeCluster(spec = num_cores,  outfile = "./cluster_log_file_TS.txt")
   function_input <- snow::clusterSplit(cluster_function, elective_rows)
   toc()
   tic("Loading up elective functions")
@@ -404,22 +433,43 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores){
   
   
   elective_data <- remove_wt_outliers(elective_data)
-  return(elective_data)
+  
+  
+  ## get waiting pool ##
+  
+  if(as.Date(forecast_date) %in% elective_data$date){
+    end_date <- forecast_date
+  }else{
+    dates_in_forecast <- as.Date(elective_data$date)
+    end_date <- min(dates_in_forecast[dates_in_forecast > forecast_date])
+  }
+  
+  waiting_pools <- lapply(icds, FUN = waiting_pool,
+                          hes_data = hes_data,
+                          end_date)
+  waiting_pools <- dplyr::bind_rows(waiting_pools)
+  
+  
+  return(list(elective_data, waiting_pools))
   
 }
 
 
-time_series_creator <- function(hes_data, num_cores){
+time_series_creator <- function(hes_data, num_cores, forecast_date){
   require(stringr)
   require(plyr)
   require(dplyr)
   require(snow)
   require(tictoc)
   emergency_ts <- running_emergencies_ts_in_parallel(hes_data, num_cores = num_cores)
-  electives_ts <- running_elective_ts_in_parallel(hes_data = hes_data,
-                                                  num_cores = num_cores)
+  electives_res <- running_elective_ts_in_parallel(hes_data = hes_data,
+                                                  num_cores = num_cores,
+                                                  forecast_date = forecast_date)
+  electives_ts <- electives_res[[1]]
+  waiting_patient_pool <- electives_res[[2]]
   
-  return(list(emergency_ts, electives_ts))
+  
+  return(list(emergency_ts, electives_ts, waiting_patient_pool))
   
   
 }
