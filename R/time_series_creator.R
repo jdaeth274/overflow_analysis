@@ -40,6 +40,7 @@ row_sumer <- function(row_indy, out_row, hes_df){
     
   }else{
     return_row$prop_Frail <- NA
+    return_row$prop_cc <- NA
   }
   
   return(return_row)
