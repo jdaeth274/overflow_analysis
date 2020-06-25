@@ -34,9 +34,11 @@ row_sumer <- function(row_indy, out_row, hes_df){
   
   return_row$Admissions <- nrow(subset_hes)
   
-  if(nrow(subset_hes) > 0)
+  if(nrow(subset_hes) > 0){
     return_row$prop_Frail <- sum(subset_hes$Frail) / nrow(subset_hes)
-  else{
+    return_row$prop_cc <- sum(subset_hes$cc) / nrow(subset_hes)
+    
+  }else{
     return_row$prop_Frail <- NA
   }
   
@@ -96,7 +98,7 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   emergencies_only <- hes_data[hes_data$cohort == 3,]
   
   emergencies_cols <- which(colnames(emergencies_only) %in% c("admidate_week", "admidate_YYYY",
-                                                         "Frail","ICD","agegrp_v3"))
+                                                         "Frail","ICD","agegrp_v3","cc"))
   emergencies_only <- emergencies_only[,emergencies_cols]
   
   
@@ -111,10 +113,10 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   num_ages <- 3
   nrows_df <- num_weeks * num_ages * num_icd
   
-  emergency_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 6))
+  emergency_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 7))
   colnames(emergency_out_Df) <- c("admidate_YYYY","admidate_week",
                                   "Admissions","ICD","agegrp_v3",
-                                  "prop_Frail")
+                                  "prop_Frail","prop_cc")
   weeks_year_split <- stringr::str_split_fixed(week_year_combos, "-",2)
   emergency_out_Df$admidate_YYYY <- rep(as.integer(weeks_year_split[,2]),(num_ages * num_icd))
   emergency_out_Df$admidate_week <- rep(as.integer(weeks_year_split[,1]),(num_ages * num_icd))
@@ -193,10 +195,12 @@ row_sumer_elective <- function(row_indy, out_row, hes_df){
     return_row$prop_Frail <- sum(subset_hes$Frail) / nrow(subset_hes)
     return_row$p50_WT_ICDc <- median(subset_hes$WT)
     return_row$mean_WT_ICDc <- mean(subset_hes$WT)
+    return_row$prop_cc <- sum(subset_hes$cc) / nrow(subset_hes)
   }else{
     return_row$prop_Frail <- NA
     return_row$p50_WT_ICDc <- NA
     return_row$mean_WT_ICDc <- NA
+    return_row$prop_cc <- NA
   }
   
   
