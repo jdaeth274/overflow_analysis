@@ -387,7 +387,7 @@ merged_rcs0910level <- left_join(NA_merged_rcs1011level, national_rcs0910,
                                  "SUSHRGep" = "CURRENCY.CODE"))
 
 # append merged_rcs0910level to merged_orglevel to form complete hes-cost merge (still missing 16,635 hrg-cost matches, 0.27% of HES data - this is as good as it gets)
-full_mergedcosts <- rbind(merged_orglevel,
+full_mergedcosts <- rbind(notNA_merged_orglevel,
                           notNA_merged_rcs1213level,
                           notNA_merged_rcs1112level,
                           notNA_merged_rcs1011level,
@@ -428,7 +428,7 @@ write.csv(costs_export,
           quote = FALSE)
 
 # calculate average unit cost per patient group across WT for electives (eg. for p25 WT, what is the cost p25, p50, p75, mean, sd)
-electives_merged <- subset(merged, admimeth_C == 1)
+electives_merged <- subset(full_mergedcosts_noNA, admimeth_C == 1)
 
 quantilewt <- electives_merged %>% group_by(ICD, agegrp_v3) %>%
   do(data.frame(t(quantile(.$WaitingTime, props = c(0.25, 0.50, 0.75)))))
@@ -441,12 +441,12 @@ quantilewt <- rename(quantilewt, min = X0., p25 = X25., median = X50., p75 = X75
 electives_wtquant <- left_join(electives_merged, quantilewt,
                                by = c("ICD","agegrp_v3"))
 
-electives_wtquant$p025 <- ifelse(electives_wtquant$WaitingTime < electives_wtquant$p25, 1, 0)
-electives_wtquant$p2550 <- ifelse((electives_wtquant$WaitingTime >= electives_wtquant$p25 & 
-                                     electives_wtquant$WaitingTime < electives_wtquant$median), 1, 0)
-electives_wtquant$p5075 <- ifelse((electives_wtquant$WaitingTime >= electives_wtquant$median & 
-                                     electives_wtquant$WaitingTime < electives_wtquant$p75), 1, 0)
-electives_wtquant$p75100 <- ifelse((electives_wtquant$WaitingTime >= electives_wtquant$p75), 1, 0)
+electives_wtquant$p025 <- ifelse(electives_wtquant$WaitingTime < electives_wtquant$x25, 1, 0)
+electives_wtquant$p2550 <- ifelse((electives_wtquant$WaitingTime >= electives_wtquant$x25 & 
+                                     electives_wtquant$WaitingTime < electives_wtquant$x50), 1, 0)
+electives_wtquant$p5075 <- ifelse((electives_wtquant$WaitingTime >= electives_wtquant$x50 & 
+                                     electives_wtquant$WaitingTime < electives_wtquant$x75), 1, 0)
+electives_wtquant$p75100 <- ifelse((electives_wtquant$WaitingTime >= electives_wtquant$x75), 1, 0)
 
 electives_p025 <- subset(electives_wtquant, p025 == 1)
 electives_p2550 <- subset(electives_wtquant, p2550 == 1)

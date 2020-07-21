@@ -39,10 +39,10 @@ failure_function <- function(cohort23,csv_survial_name,
   # 1.1 Fit survival function
   
   survival_df <- NULL
-  ages <- c("<24","25-64","65+")
+  ages <- unique(cohort23$agegrp_v3)
   
-  for(k in 1:3){
-    current_age_dat <- cohort23[cohort23$agegrp_v3 == k,]
+  for(k in 1:length(ages)){
+    current_age_dat <- cohort23[cohort23$agegrp_v3 == ages[k],]
     surv_object <- Surv(time = current_age_dat$WaitingTime, event = current_age_dat$Elective2Emergency)
     e2e <- survfit(surv_object ~ 1, data = current_age_dat, type = "kaplan-meier")
     
@@ -89,10 +89,10 @@ failure_function <- function(cohort23,csv_survial_name,
   
   out_df <- data.frame(matrix(ncol = 5, nrow = 3))
   colnames(out_df) <- c("age","ICD","day_7","mean_7","median_7")
-  out_df$age <- c("<24","25-64","65+")
+  out_df$age <- ages
   out_df$ICD <- current_ICD
   
-  for(k in 1:3){
+  for(k in 1:length(ages)){
     
     ## get day 7 vals first 
     day_7s <- survival_df[survival_df$time == 7 &
@@ -130,8 +130,8 @@ failure_function <- function(cohort23,csv_survial_name,
       
     }
     
-    out_df$mean_7[k] <- mean(multi_df)
-    out_df$median_7[k] <- median(multi_df)
+    out_df$mean_7[k] <- mean(actual_vec)
+    out_df$median_7[k] <- median(actual_vec)
     
   }
   
@@ -149,19 +149,21 @@ failure_function <- function(cohort23,csv_survial_name,
 
 # 2.1 GA transitions (Cohort = 1, event = ga_transitions == 1, 2, or 3, time = GA_LoS)
 
-cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Recovered, 25-64", "Recovered, 65+",
-                                                          "CC, <25", "CC, 25-64", "CC, 65+","Died, <25",
-                                                          "Died, 25-64","Died, 65+"),
-                              ICD, unique_only = FALSE){
+cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, 1", "Recovered, 2", "Recovered, 3",
+                                                          "CC, 1", "CC, 2", "CC, 3","Died, 1",
+                                                          "Died, 2","Died, 3"),
+                              ICD, unique_only = FALSE, missing_age = 0){
   ## This function takes the output of the competing risks model for emergency admissions and 
   ## then plots our cumulative incidence curves and then returns (in LOS) the transitions probs
   ## at day 7 and multiples of 7
-
+  
   tests_pos <- grep("Tests", names(CI_dataset), ignore.case = TRUE)
-  tot_trans <- str_split_fixed(group_names, ",\\s",2)[c(1,4,7),1]
-  print(group_names[4])
   
   cuminc_df <- NULL
+  
+  ## Just check we've got all the age groups we need 
+  
+  
   
   for(k in 1:(tests_pos - 1)){
     current_title <- group_names[k]
@@ -290,7 +292,7 @@ cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Rec
     los_df$Day_7[age_rows[2]] <- current_7_data[current_7_data$transition == transitions[2,1],2]
     los_df$Day_7[age_rows[3]] <- current_7_data[current_7_data$transition == transitions[3,1],2]
     
-    trans_nights <- c(k, k+3, k+6)
+    trans_nights <- c(k, k+nrow(age_groupings), k+(2*nrow(age_groupings)))
     average_df <- as.data.frame(seventh_day_timies$est)
     na_1 <- which(is.na(average_df[trans_nights,1]))
     if(length(na_1) > 0)
@@ -298,18 +300,12 @@ cuminc_list_to_df <- function(CI_dataset, group_names = c("Recovered, <25", "Rec
     
     
     
-    average_df$zero <- 0 
-    average_df <- average_df[,c(ncol(average_df),1:(ncol(average_df) - 1))]
-    diff_df <- data.frame(matrix(ncol = (ncol(average_df) - 1), nrow = nrow(average_df)))
-    for(p in 2:ncol(average_df)){
-      
-      diff_df[,p-1] <- average_df[,p] - average_df[,(p-1)]
-    }
     
     
-    tran_1 <- as.numeric(diff_df[trans_nights[1],])
-    tran_2 <- as.numeric(diff_df[trans_nights[2],])
-    tran_3 <- as.numeric(diff_df[trans_nights[3],])
+    
+    tran_1 <- as.numeric(average_df[trans_nights[1],])
+    tran_2 <- as.numeric(average_df[trans_nights[2],])
+    tran_3 <- as.numeric(average_df[trans_nights[3],])
     
     
     
@@ -346,11 +342,21 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   # 2.1.2 Set survival datatset (grouped by age groups)
   print("On GA transitions")
   ga_start <- Sys.time()
+  ages <- unique(cohort1$agegrp_v3)
   CI.byagegrp <- cuminc(ftime = cohort1$GA_LoS, fstatus = cohort1$ga_transitions, group = cohort1$agegrp_v3)
   
   # THIS GIVES US THE CIF AT THE SPECIFIC TIME POINT (I DON'T KNOW HOW TO GET A SPECIFIC RISK/AGE-GROUP, IT JUST RETURNS ALL OF THEM)
-  
-  cuminc_df_list <- cuminc_list_to_df(CI.byagegrp, ICD = ICD_group, unique_only = TRUE) ## JD to export to CSV
+  if(length(unique(cohort1$agegrp_v3)) == 3){
+    cuminc_df_list <- cuminc_list_to_df(CI.byagegrp, ICD = ICD_group, unique_only = TRUE) ## JD to export to CSV
+  }else{
+    ages_present <- sort(unique(cohort1$agegrp_v3))
+    transitions <- rep(c("Recovered,","CC,","Died,"), each = length(ages_present))
+    ages_to_use <- rep(ages_present, 3)
+    transitions_to_use <- paste(transitions, ages_to_use, sep = " ")
+    cuminc_df_list <- cuminc_list_to_df(CI.byagegrp, ICD = ICD_group, unique_only = TRUE,
+                                        group_names = transitions_to_use) ## JD to export to CSV
+    
+  }
   los_df <- cuminc_df_list[[2]]
   cuminc_df <- cuminc_df_list[[1]]
   
@@ -410,19 +416,31 @@ cohort_3_comp_risks <- function(cohort1, ICD_group, results_pdf){
   
   CI.byagegrp_CC <- cuminc(ftime = cohort1$cc_LoS, fstatus = cohort1$cc_transitions, group = cohort1$agegrp_v3)
   
-  if(length(CI.byagegrp_CC) != 10){
+  if(length(CI.byagegrp_CC) != ((3*length(ages)) + 1)){
     
     cc_cuminc_df <- 0
     cc_los <- los_df
-    cc_los[c(2,5,8), 1] <- "GA"
+    cc_los[which(los_df$Transition == "CC"),1] <- "GA"
     cc_los[,c(2,3,4)] <- NA
    
    }else{
-    
-  
-    cc_df_list <- cuminc_list_to_df(CI_dataset = CI.byagegrp_CC, group_names = c("Recovered, <25", "Recovered, 25-64", "Recovered, 65+",
+      if(length(unique(cohort1$agegrp_v3)) == 3){
+        cc_df_list <- cuminc_list_to_df(CI_dataset = CI.byagegrp_CC, group_names = c("Recovered, <25", "Recovered, 25-64", "Recovered, 65+",
                                                                                  "GA, <25", "GA, 25-64", "GA, 65+","Died, <25",
                                                                                  "Died, 25-64","Died, 65+"), ICD = ICD_group)
+    
+      }else{
+        if(ICD_group == 15)
+          
+        ages_present <- sort(unique(cohort1$agegrp_v3))
+        transitions <- rep(c("Recovered,","GA,","Died,"), each = length(ages_present))
+        ages_to_use <- rep(ages_present, 3)
+        transitions_to_use <- paste(transitions, ages_to_use, sep = " ")
+        cc_df_list <- cuminc_list_to_df(CI.byagegrp_CC, ICD = ICD_group, unique_only = TRUE,
+                                            group_names = transitions_to_use) ## JD to export to CSV
+      
+    }    
+  
     
     cc_cuminc_df <- cc_df_list[[1]]
     cc_los <- cc_df_list[[2]]
@@ -654,12 +672,15 @@ crr_cluster_run_18 <- function(fail_type, cohort_data){
 
 cluster_sum_up <- function(cluster_res, out_dfs, current_k){
   
+  
+    
+  
   transitions_state <- seq(((current_k*6) - 5), current_k*6)
   ## Above loops through the transitions states for an age given by current k
   ## tells us the position in the transitions so we can be cc or ga
   counter <- 0
-  ## tells us the row of the outdf to use
-  age <- 0
+  ## tells us the row of the outdf to use basically the transitions state (not age!)
+  out_df_trans <- 0
   ## tells us which of the out dfs to use
   ward <- 1
   ## gives us all the rows for this age group 
@@ -668,9 +689,9 @@ cluster_sum_up <- function(cluster_res, out_dfs, current_k){
   
   for(trans in transitions_state){
     counter <- counter + 1
-    age <- age + 1
+    out_df_trans <- out_df_trans + 1
     if(counter == 4){
-      age <- 1
+      out_df_trans <- 1
       ward <- 2
     }
     
@@ -724,18 +745,19 @@ cluster_sum_up <- function(cluster_res, out_dfs, current_k){
             }
             
           }
+        multi_df <- actual_vec
       }
-      out_dfs[[ward]]$coeff[age_rows[age]] <- CI.agegrp1_t1$coef
-      out_dfs[[ward]]$variance[age_rows[age]] <- CI.agegrp1_t1$var[1,1]
-      out_dfs[[ward]]$day_7[age_rows[age]] <- seven_t1
-      out_dfs[[ward]]$mean_7[age_rows[age]] <- mean(diff_vec, na.rm = TRUE)
-      out_dfs[[ward]]$median_7[age_rows[age]] <- median(diff_vec, na.rm = TRUE)
+      out_dfs[[ward]]$coeff[age_rows[out_df_trans]] <- CI.agegrp1_t1$coef
+      out_dfs[[ward]]$variance[age_rows[out_df_trans]] <- CI.agegrp1_t1$var[1,1]
+      out_dfs[[ward]]$day_7[age_rows[out_df_trans]] <- seven_t1
+      out_dfs[[ward]]$mean_7[age_rows[out_df_trans]] <- mean(multi_df, na.rm = TRUE)
+      out_dfs[[ward]]$median_7[age_rows[out_df_trans]] <- median(multi_df, na.rm = TRUE)
     }else{
-      out_dfs[[ward]]$coeff[age_rows[age]] <- 0
-      out_dfs[[ward]]$variance[age_rows[age]] <- 0
-      out_dfs[[ward]]$day_7[age_rows[age]] <- 0
-      out_dfs[[ward]]$mean_7[age_rows[age]] <- 0
-      out_dfs[[ward]]$median_7[age_rows[age]] <- 0
+      out_dfs[[ward]]$coeff[age_rows[out_df_trans]] <- 0
+      out_dfs[[ward]]$variance[age_rows[out_df_trans]] <- 0
+      out_dfs[[ward]]$day_7[age_rows[out_df_trans]] <- 0
+      out_dfs[[ward]]$mean_7[age_rows[out_df_trans]] <- 0
+      out_dfs[[ward]]$median_7[age_rows[out_df_trans]] <- 0
     }
   }
   
@@ -1255,10 +1277,19 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
     failure_csv <- paste(base_dir, "/survival_for_groups.csv", sep = "")
     transitions_pdf <- paste(base_dir, "/one_ICD_results.pdf", sep = "")
     
+    if(elective_run){
     cohort12_failure_func <- failure_function(cohort23 = cohort12, csv_survial_name = failure_csv,
                                               pdf_to_export = failure_pdf, current_ICD = single_icd)   
-    cohort_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = single_icd, results_pdf = transitions_pdf)
     cohort1_transitions <- cohort_1_competing_risk(cohort1, current_ICD = single_icd, core_18 = core_18)
+    }else{
+      cohort12_failure_func <- 0
+      cohort1_transitions <- list(0,0)
+      }
+    if(emergency_run){
+      cohort_3_transitions <- cohort_3_comp_risks(cohort3, ICD_group = single_icd, results_pdf = transitions_pdf)
+    }else{
+      cohort_3_transitions <- list(0,0,0,0)
+    }
     
     failure_res <- cohort12_failure_func
     cohort_3_ga <- cohort_3_transitions[[2]]
@@ -1290,36 +1321,36 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
     cohort_3_cc <- NULL
     if(elective_run == TRUE){
     
-    for(k in 1:length(elective_groupings)){
-      
-      current_icd <- elective_groupings[k]
-      cohort12_icd <- cohort12[cohort12$elective_icd == current_icd,]
-      cohort1_icd <- cohort1[cohort1$ICD == current_icd,]
-      
-      failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
-      failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
-      
-      ## try catch for survival analysis 
-      ## failure function 
-      
-      
-      cohort12_failure_func <- failure_func_try(cohort23 =  cohort12_icd,
-                                                csv_survival_name = failure_csv,
-                                                pdf_to_export = failure_pdf, current_ICD = current_icd)   
-      
-      if(length(cohort12_failure_func) != 0){
-        failure_res <- rbind.data.frame(failure_res, cohort12_failure_func[[2]])
-      }
-      
-      if(crr_try){
-      
-         cohort1_transitions <- crr_func_try(cohort1 = cohort1_icd , current_ICD = current_icd,
-                                                       core_18 = core_18)
+      for(k in 1:length(elective_groupings)){
+        
+        current_icd <- elective_groupings[k]
+        cohort12_icd <- cohort12[cohort12$elective_icd == current_icd,]
+        cohort1_icd <- cohort1[cohort1$ICD == current_icd,]
+        
+        failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
+        failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
+        
+        ## try catch for survival analysis 
+        ## failure function 
+        
+        
+        cohort12_failure_func <- failure_func_try(cohort23 =  cohort12_icd,
+                                                  csv_survival_name = failure_csv,
+                                                  pdf_to_export = failure_pdf, current_ICD = current_icd)   
+        
         if(length(cohort12_failure_func) != 0){
-          cohort_1_res_ga <- rbind.data.frame(cohort_1_res_ga, cohort1_transitions[[1]])
-          cohort_1_res_cc <- rbind.data.frame(cohort_1_res_cc, cohort1_transitions[[2]])
+          failure_res <- rbind.data.frame(failure_res, cohort12_failure_func[[2]])
         }
-      }else{
+        
+        if(crr_try){
+        
+           cohort1_transitions <- crr_func_try(cohort1 = cohort1_icd , current_ICD = current_icd,
+                                                         core_18 = core_18)
+          if(length(cohort12_failure_func) != 0){
+            cohort_1_res_ga <- rbind.data.frame(cohort_1_res_ga, cohort1_transitions[[1]])
+            cohort_1_res_cc <- rbind.data.frame(cohort_1_res_cc, cohort1_transitions[[2]])
+          }
+    }else{
       cohort_1_res_ga <- 0
       cohort_1_res_cc <- 0
     }
@@ -1351,6 +1382,9 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
   }
   
   ## Lets write these dfs out 
+  if(substr(base_dir, nchar(base_dir),nchar(base_dir)) == "/")
+    base_dir <- substr(base_dir,1,nchar(base_dir) - 1 )
+  
   failure_csv <- paste(base_dir, "/summary_cohort_1_to_3.csv", sep = "")
   elective_ga_csv <- paste(base_dir, "/cohort_1_ga_transitions.csv", sep = "")
   elective_cc_csv <- paste(base_dir, "/cohort_1_cc_transitions.csv", sep = "")
@@ -1360,16 +1394,17 @@ survival_analysis_set_up <- function(cohorts_data, single_ICD = TRUE, base_dir, 
   if(elective_run){
     write.csv(failure_res, file = failure_csv, row.names = FALSE, quote = FALSE)
     if(crr_try){
-      cohort_3_ga <- cohort_3_ga[,-2]
-      cohort_3_cc <- cohort_3_cc[,-2]
-      write.csv(cohort_3_ga, file = elective_ga_csv, row.names = FALSE, quote = FALSE)
-      write.csv(cohort_3_cc, file = elective_cc_csv, row.names = FALSE, quote = FALSE)
+      write.csv(cohort_1_res_ga, file = elective_ga_csv, row.names = FALSE, quote = FALSE)
+      write.csv(cohort_1_res_cc, file = elective_cc_csv, row.names = FALSE, quote = FALSE)
     }
       
   }
   if(emergency_run){
-    write.csv(cohort_1_res_ga, file = emergency_ga_csv, row.names = FALSE, quote = FALSE)
-    write.csv(cohort_1_res_cc, file = emergency_cc_csv, row.names = FALSE, quote = FALSE)
+    print(emergency_ga_csv)
+    print(emergency_cc_csv)
+    print(cohort_3_cc)
+    write.csv(cohort_3_ga, file = emergency_ga_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_3_cc, file = emergency_cc_csv, row.names = FALSE, quote = FALSE)
   }
   
   

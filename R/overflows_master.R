@@ -14,13 +14,24 @@ require(KFAS)
 require(forecast)
 require(pryr)
 
-source(file = "D:/Overflows/cohort_identification.R")
-source(file = "D:/Overflows/survival analysis.R")
-source(file = "D:/Overflows/transitions_coding.R")
-source(file = "D:/Overflows/time_series_creator.R")
-source(file = "D:/Overflows/time_series_forecast.R")
+devtools::install_github("erickawaguchi/fastcmprsk",ref = "developer",
+                         lib="C:/R-3.6.2/library")
 
 
+require(fastcmprsk, lib.loc = "C:/R-3.6.2/library")
+
+
+setwd("E:/HES/COVID/")
+
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/cohort_identification.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/transitions_coding.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/survival analysis.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/time_series_creator.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/time_series_forecast.R")
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/regression_analyses.R")
+
+neos_one <- vroom(file = "./HES_APC_CC_0912_Neoplasms1.csv", delim = ",")
+subset_dat <- read.csv("./HES_APC_CC_0913_TEMP02_s1.csv", stringsAsFactors = FALSE)
 
 ## First step to load up HES dataset ##
 
@@ -29,195 +40,342 @@ input_args <- commandArgs(trailingOnly = TRUE)
 hes_data <- vroom(input_args[1], delim = ",")
 
 
-cohort_allocation <- cohort_set_up(num_cores = 12,
-                                   data_loc = "D:/Overflows/HES_APC_CC_0912_Neoplasmsv2.csv")
+cohort_allocation <- cohort_set_up(num_cores = 14,
+                                   data_loc = "E:/HES/COVID/HES_APC_CC_0913_TEMP02_s1.csv")
+                                    
 transitions_data <- hes_transitions(cohort_allocation)
+neo_trans_data <- vroom(file = "E:/HES/COVID/neo_trans_data_07_06_2020.csv",
+                        delim = ",")
 
-transitions_data <- vroom("D:/Overflows/neo_trans.csv", delim = ",", num_threads = 8)
+## Just for neoplasms ##
+vroom_write(transitions_data,
+            path = "E:/HES/COVID/HES_APC_CC_0913_transitions_all_ICD_S1.csv",
+            delim = ",")
+
+system.time(transitions_data <- vroom(file = "E:/HES/COVID/HES_APC_CC_0913_transitions_all_ICD.csv", delim = ","))
 
 
-survival_res <- survival_analysis_set_up(transitions_data, single_ICD = TRUE, base_dir = "D:/Overflows",
-                                         single_icd = "2")
+## regression analyses 
 
+
+source("D:/Dropbox/COVID19/Overflow/Rscript/R/regression_analyses.R")
+
+
+elective_no_trends <- regression_cluster_set_up(patient_group = "elective",
+                                                hes_data = transitions_data, forecast_length = 52,
+                                                forecast_start = "2012-03-05",
+                                                month_trend = FALSE, time_trend = FALSE)
+
+
+source("D:/Dropbox/COVID19/Overflow/Rscript/R/regression_analyses.R")
+emergency_no_trends <- regression_cluster_set_up(patient_group = "emergency",
+                                                 hes_data = transitions_data, forecast_length = 52,
+                                                 forecast_start = "2012-03-05",
+                                                 month_trend = FALSE, time_trend = FALSE)
+source("D:/Dropbox/COVID19/Overflow/Rscript/R/regression_analyses.R")
+failure_func <- failure_func_setup(transitions_data, month_trend = FALSE,
+                                   time_trend = FALSE)
+
+
+
+multi_graph_plotter(elective_both_trends_squared, "D:/Dropbox/COVID19/Overflow/regressions_elective_both_trends_squared_wt.pdf",
+                    trend_types = "month and time WT^2")
+
+multi_graph_plotter(elective_no_trends, "D:/Dropbox/COVID19/Overflow/regressions_elective_no_trends.pdf",
+                    trend_types = "linear WT only")
+
+
+
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/survival analysis.R")
+survival_res <- survival_analysis_set_up(transitions_data, single_ICD = FALSE, base_dir = "D:/Dropbox/COVID19/Overflow/",
+                                         core_18 = TRUE, elective_run = TRUE, emergency_run = TRUE, crr_try = TRUE)
+survival_res_emerg <- survival_analysis_set_up(transitions_data, single_ICD = FALSE, base_dir = "D:/Dropbox/COVID19/Overflow/",
+                                         core_18 = TRUE, elective_run = FALSE, emergency_run = TRUE, crr_try = TRUE)
 failure_func_df <- survival_res[[1]]
 emergency_ga <- survival_res[[2]]
 emergency_cc <- survival_res[[3]]
 elective_ga <- survival_res[[4]]
 elective_cc <- survival_res[[5]]
 
+save(survival_res, file = "D:/Dropbox/COVID19/Overflow/SA_res_2020_7_7.Rdata")
+load(file = "D:/Dropbox/COVID19/Overflow/SA_res_2020_7_7.Rdata", verbose = TRUE)
 
 write.csv(failure_func_df,
-          file = "D:/Overflows/cohort_1_to_2_failure_function.csv",
-          row.names = FALSE,quote = FALSE)
+          file = "D:/Dropbox/COVID19/Overflow/cohort_1_to_3_5_7_2020.csv",
+          row.names = FALSE,
+          quote = FALSE)
+
 
 write.csv(emergency_ga,
-          file = "D:/Overflows/cohort_3_GA_transitions.csv",
-          row.names = FALSE,quote = FALSE)
+          file = "D:/Dropbox/COVID19/Overflow/cohort_3_ga_transitions_all_ICD_5_7_2020.csv",
+          row.names = FALSE,
+          quote = FALSE)
 
 write.csv(emergency_cc,
-          file = "D:/Overflows/cohort_3_CC_transitions.csv",
-          row.names = FALSE,quote = FALSE)
+          file = "D:/Dropbox/COVID19/Overflow/cohort_3_cc_transitions_all_ICD_5_7_2020.csv",
+          row.names = FALSE,
+          quote = FALSE)
+
+## make elective na mean & medians the day 7 vals 
+elective_ga_na <- which(is.na(elective_ga$mean_7))
+elective_ga_na_med <- which(is.na(elective_ga$median_7))
+elective_ga[c(elective_ga_na, elective_ga_na_med),] <- elective_ga[c(elective_ga_na, elective_ga_na_med), "day_7"]
 
 write.csv(elective_ga,
-          file = "D:/Overflows/cohort_1_GA_transitions_coeff.csv",
-          row.names = FALSE,quote = FALSE)
+          file = "D:/Dropbox/COVID19/Overflow/Wolfram/cohort_1_ga_all_ICDS_5_7_2020.csv",
+          row.names = FALSE,
+          quote = FALSE)
 
+elective_ga_na <- which(is.na(elective_cc_2$mean_7))
+elective_ga_na_med <- which(is.na(elective_cc_2$median_7))
+elective_cc_2[elective_ga_na,c("mean_7","median_7")] <- elective_cc[c(elective_ga_na,
+                                                                    elective_ga_na_med), "day_7"]
 write.csv(elective_cc,
-          file = "D:/Overflows/cohort_1_CC_transitions_coeff.csv",
-          row.names = FALSE,quote = FALSE)
+          file = "D:/Dropbox/COVID19/Overflow/Wolfram/cohort_1_cc_all_ICDS_5_7_2020.csv",
+          row.names = FALSE,
+          quote = FALSE)
 
 
-transitions_data$ICD <- "2"
-source(file = "D:/Overflows/time_series_creator.R")
-time_series <- time_series_creator(transitions_data, num_cores = 12)
-source(file = "D:/Overflows/time_series_forecast.R")
-times_series_data <- running_forecasts(total_cohort_data = time_series, train_date = as.Date("2012-03-01"),
-                                       forecast_period = 52, single_icd = 2, base_dir = "D:/Overflows/")
-emergency_admis <- times_series_data[[1]]
-emergency_frail <- times_series_data[[2]]
-elective_admis <- times_series_data[[3]]
-elective_median <- times_series_data[[4]]
-elective_mean <- times_series_data[[5]]
-elective_frail <- times_series_data[[6]]
-
-write.csv(emergency_admis, 
-          file = "D:/Overflows/neoplasms_cohort_1_Admissions_forecast.csv",
-          row.names = FALSE, quote = FALSE)
-write.csv(emergency_frail, 
-          file = "D:/Overflows/neoplasms_cohort_1_Frail_forecast.csv",
-          row.names = FALSE, quote = FALSE)
-write.csv(elective_admis, 
-          file = "D:/Overflows/neoplasms_cohort_3_new_pool_forecast.csv",
-          row.names = FALSE, quote = FALSE)
-write.csv(elective_median, 
-          file = "D:/Overflows/neoplasms_cohort_3_median_wait_forecast.csv",
-          row.names = FALSE, quote = FALSE)
-write.csv(elective_mean, 
-          file = "D:/Overflows/neoplasms_cohort_3_mean_wait_forecast.csv",
-          row.names = FALSE, quote = FALSE)
-write.csv(elective_frail, 
-          file = "D:/Overflows/neoplasms_cohort_3_frailty_forecast.csv",
-          row.names = FALSE, quote = FALSE)
+icd_7 <- transitions_data[transitions_data$ICD == 7,]
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/survival analysis.R")
+test_ICD_3_sa <- survival_analysis_set_up(icd_7,base_dir = "D:/Dropbox/COVID19/Overflow/",
+                                         core_18 = TRUE, elective_run = TRUE, emergency_run = FALSE, crr_try = TRUE,
+                                         single_ICD = TRUE, single_icd = 7)
 
 
-test_1 <- cohort_allocation[cohort_allocation$hesid == "09A941FAB40A2072CEBE9064E9241B5E",]
+## time_series ##
+
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/time_series_creator.R")
+time_series_data <- time_series_creator(hes_data = transitions_data, num_cores = 12, forecast_date = "2012-03-01",
+                                        emergency_run = TRUE, elective_ts = TRUE, forecast_cutoff = "2012-03-05")
+
+waiting_pool <- time_series_data[[3]]
+write.csv(waiting_pool,
+          file = "D:/Dropbox/COVID19/Overflow/Wolfram/waiting_pool.csv",
+          row.names = FALSE,
+          quote = FALSE)
+
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/time_series_forecast.R")
+times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data, train_date = as.Date("2012-03-01"),
+                                       forecast_period = 52,  base_dir = "D:/Dropbox/COVID19/Overflow/Results/TimeSeries/",
+                                       run_admis = TRUE, forecast_admis = FALSE, forecast_WT = FALSE, forecast_frail = FALSE)
 
 
-neo_vals <- vroom("D:/Overflows/HES_APC_CC_0912_Neoplasmsv2.csv", delim = ",")
-###############################################################################
-## Function list here: 
+time_series_forecasts_cc <- times_series_forecasts
+save(times_series_forecasts, file = "D:/Dropbox/COVID19/Overflow/time_series_data.Rdata")
 
 
-test_data <- vroom("D:/Overflows/HES_APC_CC_0912_Neoplasmsv2.csv",
-                   delim = ",")
-test_rows <- plyr::count(test_hesid)
-test_data_narrow <- test_data[test_data$hesid == test_hesid,]
-test_data_narrow$index <- seq(1, nrow(test_data_narrow))
-test_data_narrow$cohort <- 3
+## Sum up file 
 
-electives <- which(test_data_narrow$admimeth_C == 1)
+load("D:/Dropbox/COVID19/Overflow/time_series_20_07_2020.Rdata", verbose = TRUE)
+load("D:/Dropbox/COVID19/Overflow/waiting_prop_data_20_07_2020.Rdata", verbose = TRUE)
+load("D:/Dropbox/COVID19/Overflow/reg_results.Rdata", verbose = TRUE)
+covid_csv <- read.csv(file = "D:/Dropbox/COVID19/Overflow/projections2.csv",
+                      stringsAsFactors = FALSE)
+covid_csv_high_low <- covid_csv[,c(1:4,8:10)]
 
-test_data_narrow$cohort[electives] <- 1
-parallel_cols <- which(colnames(test_data_narrow) %in% c("hesid","index","diag_01","cohort","rttstart",
-                                             "admidate_MDY"))
-parallel_data <- test_data_narrow[,parallel_cols]
-paralell_admi_nas <- which(is.na(parallel_data$admidate_MDY))
-if(length(paralell_admi_nas) > 0){
-  parallel_data <- parallel_data[-paralell_admi_nas,]
+cc_prop <- times_series_forecasts[[8]]
+
+times_series_forecasts[[3]] <- time_series_forecasts_cc[[3]]
+times_series_forecasts[[8]] <- time_series_forecasts_cc[[8]]
+
+source(file = "D:/Dropbox/COVID19/Overflow/Rscript/R/final_output_creator.R")
+
+pi_y_df <- sum_up_function(reg_res = regression_results , time_series_data_res = time_series_data,
+                time_series_forecasts = times_series_forecasts, forecast_length = 52, COVID_preds = covid_csv,
+                out_sheet = "D:/Dropbox/COVID19/Overflow/Wolfram/full_icd_res_20_07_2020.xlsx")
+
+
+emergency_admis <- times_series_forecasts[[1]]
+emergency_frail <- times_series_forecasts[[2]]
+emergency_cc <- times_series_forecasts[[3]]
+
+## cohort 3, icd 2, age 3
+emerg <- time_series_data[[1]]
+cc_actual <- emerg[emerg$ICD == 9 &
+                     emerg$agegrp_v3 == 3,]
+cc_actual$date <- as.Date(cc_actual$date)
+pred_cc <- emergency_frail[emergency_frail$icd_name == "9" &
+                          emergency_frail$age == "3",]
+cc_actual <- cc_actual[cc_actual$date >= pred_cc$date[1] ,]
+cc_actual <- cc_actual[order(cc_actual$date),]
+
+plot(cc_actual$prop_Frail)
+lines(pred_cc$median)
+plot(pred_cc$median)
+lines(cc_actual$prop_cc)
+
+
+elective_admis <- times_series_forecasts[[3]]
+elective_median <- times_series_forecasts[[4]]
+elective_mean <- times_series_forecasts[[5]]
+elective_frail <- times_series_forecasts[[6]]
+
+
+#test_1 <- cohort_allocation[cohort_allocation$hesid == "09A941FAB40A2072CEBE9064E9241B5E",]
+
+
+############################################ to be inserted into one of the source files
+# calculates patients currently in hospital at start of pandemic
+transitions_data_whole$disdate_MDY <- as.Date(transitions_data_whole$disdate_MDY, format = "%d%b%Y")
+
+transitions_data$currentpt <- ifelse(transitions_data_whole$admidate_MDY < "2012-03-05"
+                                           & transitions_data_whole$disdate_MDY >= "2012-03-05", 1, 0)
+
+y0 <- subset(transitions_data, currentpt == 1)
+y0_collapsed <- do.call(data.frame, aggregate(y0$One, list(y0$ICD, y0$agegrp_v3, y0$admimeth_C, y0$cc), sum))
+
+colnames(y0_collapsed) <- c("ICD","agegrp_v3","admimeth","cc","y0")
+
+y0_collapsed$disease <- "ICD"
+
+y0_collapsed$age <- paste("_AGE",y0_collapsed$agegrp_v3)
+
+y0_collapsed$p <- paste0(y0_collapsed$disease, y0_collapsed$ICD,y0_collapsed$age)
+y0_collapsed$S <- ifelse(y0_collapsed$cc == 1, "C", "G")
+y0_collapsed$a <- ifelse(y0_collapsed$admimeth == 1, "N", "E")
+
+export <- select(y0_collapsed, p,S,a,y0)
+
+write.csv(export,
+          file = "D:/Dropbox/COVID19/Overflow/Wolfram/y0.csv", 
+          row.names = FALSE,
+          quote = FALSE)
+
+
+#####waiting patients
+
+transitions_data_whole$disdate_MDY <- as.Date(transitions_data_whole$disdate_MDY, format = "%d%b%Y")
+
+transitions_data$currentpt <- ifelse(transitions_data$rttstart < "2012-03-05"
+                                           & transitions_data$admidate_MDY >= "2012-03-05" 
+                                           & transitions_data$admimeth_C==1, 1, 0)
+
+x0 <- transitions_data[transitions_data$currentpt == 1,]
+x0_collapsed <- do.call(data.frame, aggregate(x0$One, list(x0$ICD, x0$agegrp_v3), sum))
+
+colnames(x0_collapsed) <- c("ICD","agegrp_v3","x0")
+
+x0_collapsed$disease <- "ICD"
+
+x0_collapsed$age <- paste("_AGE",x0_collapsed$agegrp_v3)
+
+x0_collapsed$p <- paste0(x0_collapsed$disease, x0_collapsed$ICD, x0_collapsed$age)
+#x0_collapsed$S <- ifelse(y0_collapsed$cc == 1, "C", "G")
+export <- select(x0_collapsed, p,x0)
+
+write.csv(export,
+          file = "D:/Dropbox/COVID19/Overflow/Wolfram/x0.csv", 
+          row.names = FALSE,
+          quote = FALSE)
+
+
+
+
+icd_7_dat <- transitions_data[transitions_data$ICD == 7 &
+                                transitions_data$cohort == 1,]
+
+agegrp_3_2_time <- icd_7_dat$GA_LoS
+agegrp_3_2_trans <- icd_7_dat$ga_transitions
+agegrp_3_2_WT <- icd_7_dat$WaitingTime
+current_fail <- 2
+
+
+na_tims <- which(is.na(agegrp_3_2_time))
+    if(length(na_tims) > 0){
+      agegrp_3_2_time <- agegrp_3_2_time[-na_tims]
+      agegrp_3_2_trans <- agegrp_3_2_trans[-na_tims]
+      agegrp_3_2_WT <- agegrp_3_2_WT[-na_tims]
+    }
+    old_na <- which(is.na(agegrp_3_2_trans))
+    if(length(old_na) > 0){
+      agegrp_3_2_time <- agegrp_3_2_time[-old_na]
+      agegrp_3_2_trans <- agegrp_3_2_trans[-old_na]
+      agegrp_3_2_WT <- agegrp_3_2_WT[-old_na]
+    }
+    if(current_fail != 1){
+      old_2ers <- which(agegrp_3_2_trans == current_fail)
+      old_1ers <- which(agegrp_3_2_trans == 1)
+      
+      agegrp_3_2_trans[old_2ers] <- 1
+      agegrp_3_2_trans[old_1ers] <- 2
+      
+      if(!(1 %in% unique(agegrp_3_2_trans)))
+        stop("1 not in agegrp 3_2 trans for some reason")
+      
+    }
+    
+    CI.agegrp1_t1 <- NULL
+    print(unique(agegrp_3_2_trans))
+    try(CI.agegrp1_t1 <- fastCrr(Crisk(agegrp_3_2_time, agegrp_3_2_trans, failcode = 1) ~ agegrp_3_2_WT,
+                                 variance = TRUE, returnDataFrame = TRUE))
+    if(length(CI.agegrp1_t1) != 0){
+      
+      ## Sometimes the bootstrapping in the predict.fcrr will mean with low event numbers it can't 
+      ## estimate them due to using Crisk again, we'll try turning this off if we get an error
+      cif22_pred <- NULL
+      no_var <- FALSE
+      try(cif22_pred <- fastcmprsk:::predict.fcrr(CI.agegrp1_t1, newdata = 0, tL = 1, type = "interval"), silent = TRUE)
+      if(length(cif1_pred) == 0){
+        try(cif22_pred <- fastcmprsk:::predict.fcrr(CI.agegrp1_t1, newdata = 0, tL = 1, type = "interval",
+                                                   getBootstrapVariance = FALSE), silent = TRUE)
+
+
+
+
+  }
 }
-elective_nas <- parallel_data[parallel_data$cohort == 1,]
-elective_na_rows <- which(is.na(elective_nas$rttstart))
-remove_rtt_missing <- elective_nas$index[elective_na_rows]
-if(length(remove_rtt_missing)>0)
-  parallel_data <- parallel_data[-remove_rtt_missing,]
-parallel_data$rttstart <- as.Date(parallel_data$rttstart, format = "%d%b%Y")
-parallel_data$admidate_MDY <- as.Date(parallel_data$admidate_MDY, format = "%d%b%Y")    
+    
+cif1_pred    
+cif2_pred    
+
+test_crr_1 <- crr(ftime = icd_3_age_3$cc_LoS, fstatus = icd_3_age_3$cc_transitions, cov1 = icd_3_age_3$WaitingTime, failcode = 1)
+test_2_crr <- crr(ftime = icd_3_age_3$cc_LoS, fstatus = icd_3_age_3$cc_transitions, cov1 = icd_3_age_3$WaitingTime, failcode = 2)
+
+predict_1_crr <- predict.crr(test_crr_1, cov1 = 0)
+predict_2_crr <- predict.crr(test_2_crr, cov1 = 0)
+predict(test_crr_1, 0)
+predict(test_2_crr, 0)
+
+plot.predict.crr(predict_1_crr)
+
+icd_3_cohort_1 <- icd_3[icd_3$cohort == 1,]
+icd_3_age_3 <- icd_3_cohort_1
+icd_3_cohort_1$agegrp_v3 <- icd_3_cohort_1$agegrp_v3 * 10 
+
+CI.byagegrp <- cuminc(ftime = icd_3_cohort_1$cc_LoS, fstatus = icd_3_cohort_1$cc_transitions, group = icd_3_cohort_1$agegrp_v3)
+cuminc_only <- cuminc_list_to_df(CI.byagegrp,ICD = 3)
+cuminc_only[[2]]
 
 
-cohort_allocator(hes_data = parallel_data, hes_ids = test_rows)
+## check out the group numbers for CRR
+
+transitions_data_elec <- transitions_data[transitions_data$cohort == 1,]
+transitions_data_elec <- transitions_data_elec[,c("agegrp_v3","ICD","cc","One")]
+
+group_nums <- aggregate(transitions_data_elec, by = list(transitions_data_elec$agegrp_v3,
+                                                         transitions_data_elec$cc,
+                                                         transitions_data_elec$ICD), sum)
 
 
-if(7 %in% agegrp1_pred[,1]){
-  seven_t1_cc <- agegrp1_pred[agegrp1_pred[,1] == 7, 2]
-}else if(nrow(agegrp1_pred[agegrp1_pred[,1] <7,,drop = FALSE ]) > 0){
-  seven_t1_cc <- agegrp1_pred[agegrp1_pred[,1] < 7, 2]
-  seven_t1_cc <- max(seven_t1_cc)
-}else{
-  seven_t1_cc <- 0
-}
-seven_t1_cc
+transitions_data_elec <- transitions_data[transitions_data$cohort == 1,]
+transitions_data_elec_cc <- transitions_data_elec[transitions_data_elec$cc == 1,]
+transitions_data_elec_cc <- transitions_data_elec_cc[,c("agegrp_v3","ICD","cc_transitions","One")]
+
+group_nums_cc <- aggregate(transitions_data_elec_cc, by = list(transitions_data_elec_cc$agegrp_v3,
+                                                         transitions_data_elec_cc$cc_transitions,
+                                                         transitions_data_elec_cc$ICD), sum)
 
 
+group_nums_cc <- aggregate(One ~ agegrp_v3 + ICD + cc_transitions, transitions_data_elec_cc, sum)
 
-## testing out fastcrr ##
-
-
-agegrp1 <- transitions_data[transitions_data$cohort == 1 &
-                              transitions_data$agegrp_v3 == 1,]
-agegrp1 <- agegrp1[-which(is.na(agegrp1$GA_LoS)),]
-agegrp1[which(is.na(agegrp1$ga_transitions)),"ga_transitions"] <- 0
-require(tictoc)
-require(fastcmprsk)
-tic("fast crr - use for transition 1")
-  ci_2 <- fastcmprsk::fastCrr(Crisk(agegrp1$GA_LoS, agegrp1$ga_transitions,failcode = 1) ~ agegrp1$WaitingTime,
-                            variance = TRUE, var.control = varianceControl(useMultipleCores = TRUE), returnDataFrame = TRUE)
-toc()
+ordered_group_cc <- group_nums_cc[order(group_nums_cc$One),]
 
 
-### getting predict.fcrr from github ###
-source("D:/Overflows/pedict_fcrr.R")
-
-tic("Pred step")
-ci_pred <- predict(ci_2, newdata = 0, tL = 1)
-toc()
-fcrrresults <- do.call(rbind, Map(data.frame, A=ci_pred$ftime, B=ci_pred$CIF))
+transitions_data_elec_cc[transitions_data_elec_cc$ICD == 12 & transitions_data_elec_cc$agegrp_v3 == 3 ,]
 
 
 
-### compare with old crr function 
-agegrp1 <- transitions_data[transitions_data$cohort == 1 &
-                              transitions_data$agegrp_v3 == 1,]
 
-tic("old CRR - for comparison")
-CI.agegrp1_t1 <- crr(ftime = agegrp1$GA_LoS, fstatus = agegrp1$ga_transitions,
-                     cov1 = agegrp1$WaitingTime, failcode = 1)
-toc()
 
-t1_pred <- predict.crr(CI.agegrp1_t1, cov1 = 0)
-crrresults <- do.call(rbind, Map(data.frame, A=t1_pred[,1], B=t1_pred[,2]))
-
-tic("old CRR - use for transition 2")
-CI.agegrp1_t2 <- crr(ftime = agegrp1$GA_LoS, fstatus = agegrp1$ga_transitions,
-                     cov1 = agegrp1$WaitingTime, failcode = 2)
-toc()
-
-t2_pred <- predict.crr(CI.agegrp1_t2, cov1 = 0)
-crrresults_t2 <- do.call(rbind, Map(data.frame, A=t2_pred[,1], B=t2_pred[,2]))
-
-### use fastcrr for the largest transition group; use crr for everything else
-agegrp1 <- transitions_data[transitions_data$cohort == 1 &
-                              transitions_data$agegrp_v3 == 1,]
-agegrp2 <- transitions_data[transitions_data$cohort == 1 &
-                              transitions_data$agegrp_v3 == 2,]
-agegrp3 <- transitions_data[transitions_data$cohort == 1 &
-                              transitions_data$agegrp_v3 == 3,]
-plyr::count(agegrp2$ga_transitions)
-
-### crr with cc transition 2
-tic("GA crr")
-CI.agegrp2_t1 <- crr(ftime = agegrp2$GA_LoS, fstatus = agegrp2$ga_transitions,
-                        cov1 = agegrp2$WaitingTime, failcode = 1)
-toc()
-t1_pred_cc <- predict.crr(CI.agegrp1_t1_cc, cov1 = 0)
-crrresults_t1_cc <- do.call(rbind, Map(data.frame, A=t1_pred_cc[,1], B=t1_pred_cc[,2]))
-
-### fcrr with cc transition 2
-agegrp1 <- agegrp1[-which(is.na(agegrp1$cc_LoS)),]
-agegrp1[which(is.na(agegrp1$cc_transitions)),"cc_transitions"] <- 0
-
-ci_2_cc <- fastcmprsk::fastCrr(Crisk(agegrp1$cc_LoS, agegrp1$cc_transitions,failcode = 2) ~ agegrp1$WaitingTime,
-                            variance = TRUE, var.control = varianceControl(useMultipleCores = TRUE), returnDataFrame = TRUE)
-
-ci_pred_cc <- predict(ci_2_cc, newdata = 0, tL = 1)
-
-fcrrresults_cc <- do.call(rbind, Map(data.frame, A=ci_pred$ftime, B=ci_pred$CIF))
+    
