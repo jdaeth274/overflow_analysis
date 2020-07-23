@@ -242,11 +242,7 @@ making_WT_variable <- function(hes_data){
 cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_0913_TEMP02.csv"){
     
   start_time <- Sys.time()
-  require(parallel)
-  require(plyr)
-  require(snow)
-  require(vroom)
-  require(pryr)
+  
   print("Loading up data")
   data_start <- Sys.time()
   data <- vroom(data_loc, delim = ",", num_threads = num_cores)

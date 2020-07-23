@@ -702,11 +702,6 @@ in_hosp_pool <- function(hes_data, forecast_date){
 time_series_creator <- function(hes_data, num_cores, forecast_date, emergency_run = TRUE,
                                 elective_res = TRUE, elective_ts = TRUE, waiting_pool = TRUE,
                                 forecast_cutoff){
-  require(stringr)
-  require(plyr)
-  require(dplyr)
-  require(snow)
-  require(tictoc)
   
   if(emergency_run){  
   emergency_ts <- running_emergencies_ts_in_parallel(hes_data, num_cores = num_cores)

@@ -4,11 +4,6 @@
 ## emerg transitions multinomial logit    #####################################
 ## elec transitions multinomial logit     #####################################
 ###############################################################################
-library(foreign)
-library(nnet)
-# next two are for constructing robust standard errors but do not work with nnet unless we worked them out.
-library(sandwich) 
-library(lmtest)
 
 elec_to_emergencies <- function(patient_groups, hes_data_orig, start_year, end_year, month_trend = TRUE,
                                 time_trend = TRUE){
@@ -150,10 +145,6 @@ elective_regression <- function(patient_group,hes_data_orig, start_date, forecas
   tic("Whole process")
   whole_df <- NULL
   forecast_seq <- seq(as.Date(forecast_start), by = "week", length.out = 52)
-  require(stringr)
-  require(lubridate)  
-  require(reshape2)
-  require(tictoc)
   
   pdf(file = results_pdf, paper = "A4r", width = 10, height = 7)  
   
