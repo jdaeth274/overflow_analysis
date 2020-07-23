@@ -167,7 +167,7 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
             CC_trans <- seven_rows[seven_rows$variable == "CC","value"][1]
             death_trans <- seven_rows[seven_rows$variable == "Dead","value"][1]
             GA_trans <- seven_rows[seven_rows$variable == "GA","value"][1]
-            pi_y_df[current_rows[5:8],"pi_y"] <- c(Discharge_trans,CC_trans, death_trans, GA_trans)
+            pi_y_df[current_rows[5:8],"pi_y"] <- c(Discharge_trans,GA_trans, death_trans, CC_trans)
             if(icdee %in% cc_coef$ICD){
               icdee_rows <- cc_coef[cc_coef$ICD == icdee,]
               if(age %in% icdee_rows$age){
@@ -203,7 +203,7 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
             CC_trans <- seven_rows[seven_rows$variable == "CC","value"][1]
             death_trans <- seven_rows[seven_rows$variable == "Dead","value"][1]
             GA_trans <- seven_rows[seven_rows$variable == "GA","value"][1]
-            pi_y_df[current_rows[5:8],"pi_y"] <- c(Discharge_trans,CC_trans, death_trans, GA_trans)
+            pi_y_df[current_rows[5:8],"pi_y"] <- c(Discharge_trans,GA_trans, death_trans, CC_trans)
             
           }
         }
