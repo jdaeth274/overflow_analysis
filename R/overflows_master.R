@@ -3,7 +3,7 @@
 ###############################################################################
 
 usage <- "Overflows master script, outputs excel file with patient admissions and transitions probabilities"
-input <- "Usage: R ./overflow_master.R <hes_data_loc> <transitions_data_write_loc> <forecast_start_date> <num_cores> <covid_csv_loc> <excel_loc>"
+input <- "Usage: R ./overflow_master.R <hes_data_loc> <transitions_data_write_loc> <forecast_start_date> <hes_cutoff_1> <hes_cutoff_2> <num_cores> <covid_csv_loc> <excel_loc>"
 usage <- paste(usage, input, sep = "\n")
 
 source(file = "./Rscript/R/packages.R")
@@ -18,19 +18,22 @@ source(file = "./Rscript/R/final_output_creator.R")
 
 input_args <- commandArgs(trailingOnly = TRUE)
 
-if(length(input_args) != 6){
+if(length(input_args) != 8){
   cat(usage)
-  cat("You have: ", length(input_args)," need: 6")
+  cat("You have: ", length(input_args)," need: 8")
   quit(status = 1)
 }
 
 hes_data_loc <- input_args[1]
 transitions_data_loc <- input_args[2]
 forecast_start_date <- input_args[3]
-core_nums <- input_args[4]
-covid_csv_loc <- input_args[5]
-excel_sheet <- input_args[6]
+cut_off_date_1 <- input_args[4]
+cut_off_date_2 <- input_args[5]
+core_nums <- input_args[6]
+covid_csv_loc <- input_args[7]
+excel_sheet <- input_args[8]
 
+cut_off_dates <- c(cut_off_date_1, cut_off_date_2)
 
 cohort_allocation <- cohort_set_up(num_cores = core_nums,
                                    data_loc = input_args[1])
@@ -64,7 +67,8 @@ time_series_data <- time_series_creator(hes_data = transitions_data, num_cores =
 
 times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data, train_date = as.Date(forecast_start_date),
                                        forecast_period = 52,  base_dir = "./",
-                                       run_admis = TRUE, forecast_admis = TRUE, forecast_WT = TRUE, forecast_frail = TRUE)
+                                       run_admis = TRUE, forecast_admis = TRUE, forecast_WT = TRUE, forecast_frail = TRUE,
+                                       cutoff_dates = cutoff_dates)
 
 ## Sum up file 
 covid_csv <- read.csv(file = covid_csv_loc,
