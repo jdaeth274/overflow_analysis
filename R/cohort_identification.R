@@ -12,44 +12,53 @@ cohort_allocator <- function(hes_data, hes_ids){
   ## WATCH OUT FOR THE DATE FORMAT IN RTTSTART AND ADMIDATE_MDY
   
   #print("Starting cohort identification")
-  
+  ## This takes in the narrowed hesdata for a subset of hesids 
     
     
     for(k in 1:nrow(hes_ids)){
      #cat("\r","This percent done", (round((k/nrow(hes_ids)*100), digits = 6)), "%")
     current_id <- as.character(hes_ids[k, 1])
     
+    ## subset df to just be the current hesid
     narrowed_df <- hes_data[hes_data$hesid == current_id,]
     index_altered <- NULL
     rtt_start_date_2 <- NULL
     
+    ## check if any elective admissions
     if(any(grepl(1,narrowed_df$cohort))){
       different_diags <- plyr::count(narrowed_df$diag_01)
-      
+      ## work through the different primary diagnoses
       for(j in 1:nrow(different_diags)){
         current_diag <- different_diags[j, 1]
         diag_data <- narrowed_df[narrowed_df$diag_01 == current_diag,]
+        ## check if both elective and emergency admissions for this primary diag
         if(any(grepl(1,diag_data$cohort)) & any(grepl(3, diag_data$cohort))){
           electives <- which(diag_data$cohort == 1)
           elective_rows <- diag_data[electives,]
           emergencies <- diag_data[-electives,]
           elective_rows <- elective_rows[order(elective_rows$rttstart),]
           
-          
+          ## work through all the elective admissions
           for(elec in 1:nrow(elective_rows)){
             indexers_to_change <- NULL
             current_elective <- elective_rows[elec,]
             start_date <- current_elective$rttstart
             end_date <- current_elective$admidate_MDY
             
+            ## elective to emergency as those Emergencies with admidate after rttdate and
+            ## before elective admidate 
             cohort_2ers <- which((emergencies$admidate_MDY >= start_date) &
                                    (emergencies$admidate_MDY <= end_date))
-            if(length(cohort_2ers) > 0)
+            if(length(cohort_2ers) > 0){
+              ## get index of these rows to change
               indexers_to_change <- emergencies$index[cohort_2ers]
+            }
             if(length(indexers_to_change) > 0){
+              ## Make sure we haven't previously classed these indexes as ones to change
               new_indies <- which(!(indexers_to_change %in% index_altered))
               indexers_to_change <- indexers_to_change[new_indies]
               index_altered <- base::append(index_altered, indexers_to_change)
+              ## add in the rttstart variables to these emergency admissions
               new_rttstart <- rep(current_elective$rttstart, length(indexers_to_change))
               rtt_start_date_2 <- append(rtt_start_date_2, new_rttstart)
             }
@@ -84,7 +93,7 @@ cohort_allocator <- function(hes_data, hes_ids){
       }
       
       hes_data[hes_data$index %in% index_altered,"cohort"] <- 2
-      
+      ## set the rttstart for the newly altered elective 2 emergencies.
       for(rtt in 1:length(rtt_start_date_2)){
         current_index <- index_altered[rtt]
         current_rtt <- rtt_start_date_2[rtt]
@@ -102,7 +111,9 @@ cohort_allocator <- function(hes_data, hes_ids){
 
 
 cohort_allocator_parallel <- function(unique_rows, hes_dataset, hes_ids){
-  #cat("\r","ON this num: ", unique_rows)
+  ## This function acts as way into the cohort_allocator function
+  ## getting the hesids from the cluster input and subsetting the hes-data on 
+  ## the rows 
   
   input_hes_rows <- hes_ids[unique_rows,]
   input_hes_data <- hes_dataset[hes_dataset$hesid %in% as.character(input_hes_rows[,1]),]
@@ -117,24 +128,31 @@ cohort_allocator_parallel <- function(unique_rows, hes_dataset, hes_ids){
 
 indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
   
+  ## First checks if we're running on a single ICD or not
+  
   if(ICD != "ONE"){
-    
+    ## Set up the hes_data to be parallelised over
     start_time <- Sys.time()
     current_ICD_data <- hes_data[hes_data$ICD == ICD,]
     current_ICD_data <- as.data.frame(current_ICD_data)
     rm(hes_data)
+    
+    ## looping over the hesids by creating a df with unqiue hesids.
     
     hes_ids <- plyr::count(current_ICD_data$hesid)
     hesid_rows <- seq(1, nrow(hes_ids))
     
     
     print(paste("Setting up parallel job for ICD:", ICD))
+    ## Create the cluster
     cluster_function <- snow::makeCluster(spec = num_cores)
+    ## Split the rows for the separate cluster runs to loop over
     function_input <- snow::clusterSplit(cluster_function, hesid_rows)
     print(paste("Copying over functions for ICD:", ICD))
     snow::clusterExport(cluster_function, "cohort_allocator")
     print(paste("Copying over data for ICD:", ICD))
     copy_start <- Sys.time()
+    ## export the data to the cluster nodes
     snow::clusterExport(cluster_function, "hes_ids", envir = environment())
     snow::clusterExport(cluster_function, "current_ICD_data", envir = environment())
     snow::clusterExport(cluster_function, "cohort_allocator_parallel")
@@ -146,6 +164,7 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
                                             fun = cohort_allocator_parallel,
                                             hes_ids = hes_ids,
                                             hes_dataset = current_ICD_data)
+    ## remove data, seems to help reduce memeory load
     snow::clusterEvalQ(cluster_function, rm(hes_ids, pos = environment()))
     snow::clusterEvalQ(cluster_function, rm(current_ICD_data, pos = environment()))
     snow::clusterEvalQ(cluster_function, gc())
@@ -245,8 +264,12 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   
   print("Loading up data")
   data_start <- Sys.time()
-  data <- vroom(data_loc, delim = ",", num_threads = num_cores)
-  
+  if(class(data_loc) == "character")
+    data <- vroom(data_loc, delim = ",", num_threads = num_cores)
+  else{
+    data <- data_loc
+    rm(data_loc)
+  }
   data_end <- Sys.time()
   print(data_end - data_start)
 
@@ -280,9 +303,12 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   print("Narrowing data")
   #old_size <- pryr::object_size(data)
   
+  
+  ## If no ICD variable in data, asssume that only one grouping to run through 
+  
   if(any(grepl("ICD$", colnames(data), ignore.case = TRUE))){
     
-  
+  ## First narrow down the data 
   
   parallel_cols <- which(colnames(data) %in% c("hesid","index","diag_01","cohort","rttstart",
                                                "admidate_MDY"))
@@ -292,6 +318,7 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   
   parallel_data <- data[,parallel_cols]
   
+  ## remove any without dates 
   
   paralell_admi_nas <- which(is.na(parallel_data$admidate_MDY))
   if(length(paralell_admi_nas) > 0){
@@ -302,12 +329,6 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   remove_rtt_missing <- elective_nas$index[elective_na_rows]
   if(length(remove_rtt_missing)>0)
     parallel_data <- parallel_data[-remove_rtt_missing,]
-  
-  
-  
-  
-  parallel_data$rttstart <- as.Date(parallel_data$rttstart, format = "%d%b%Y")
-  parallel_data$admidate_MDY <- as.Date(parallel_data$admidate_MDY, format = "%d%b%Y")    
   
   
   #new_size <- pryr::object_size(parallel_data)
@@ -321,6 +342,9 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   
   icds <- as.character(ICD_groupings[,1])
   
+  
+  ## Now we loop through the ICD groupings, sending each through the 
+  ## indiv_ICD_para function which will set up parallel runs for the icd
   
   print("Lapplying through the ICDS")
   lapply_start <- Sys.time()

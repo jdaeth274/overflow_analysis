@@ -1937,7 +1937,8 @@ elective_regression <- function(patient_group,hes_data_orig, start_date, forecas
 ###############################################################################
 
 elective_regression_cluster <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
-                                                                time_trend = TRUE, month_trend = TRUE, wt_variable = "linear"){
+                                                                time_trend = TRUE, month_trend = TRUE, wt_variable = "linear",
+                                        week_num){
   ## Input ICD hes data for one ICD one age group one patient group (cc/ga)
   ## to be run in parrallel
   tic("Whole process")
@@ -1955,6 +1956,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
     print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
     tic(paste("Running for patient group:",patient_group[j]))
     
+        
     split_patient_group <- str_split_fixed(patient_group[j], "-",3)
     current_icd <- as.integer(split_patient_group[1])
     current_ward <- split_patient_group[2]
@@ -1962,6 +1964,10 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
     
     hes_data <- hes_data_orig[hes_data_orig$ICD == current_icd & 
                                 hes_data_orig$agegrp_v3 == current_age,]
+    
+    forecast_week_start <- week_num_func(forecast_start, start_date)
+    forecast_week_end <- week_num_func(forecast_seq[length(forecast_seq)], start_date)
+    forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
     
     if(current_ward == "cc"){
       
@@ -1989,15 +1995,66 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
       tic("Set up outcome variable")
       hes_data$outcome <- NA
       
-      hes_data[hes_data$cc_LoS >= 7 ,"outcome"]<-"CC"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 2,"outcome"] <- "GA"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+      seven_day_seq <- seq(0, 42, 7)
+      lower_day_bound <- seven_day_seq[week_num]
+      upper_day_bound <- seven_day_seq[week_num + 1]
       
+      
+      hes_data[hes_data$cc_LoS >= upper_day_bound ,"outcome"]<-"CC"
+      hes_data[hes_data$cc_LoS >= lower_day_bound & hes_data$cc_LoS < upper_day_bound & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+      hes_data[hes_data$cc_LoS >= lower_day_bound & hes_data$cc_LoS < upper_day_bound & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+      hes_data[hes_data$cc_LoS >= lower_day_bound & hes_data$cc_LoS < upper_day_bound & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+      
+      if(length(which(is.na(hes_data$outcome))) > 0)
+        hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+      
+      
+      if(nrow(hes_data) == 0){
+        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
+        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
+        actual_dat$reg_week <- forecast_week_nums
+        actual_dat[,2:5] <- 0
+        actual_dat$WT <- "actual"
+        actual_dat$patient_group <- patient_group[j]
+        
+        current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
+        colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
+        current_coef_df$transition <- c("CC","GA","Dead","Discharged")
+        current_coef_df$patient_group <- patient_group[j]
+        current_coef_df$ICD <- current_icd
+        current_coef_df$age <- current_age
+        
+        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
+        colnames(out_df) <- c("GA","Dead","CC","Discharged")
+        mean_wt_pred <- as.data.frame(out_df)
+        mean_wt_pred$patient_group <- patient_group[j]
+        mean_wt_pred$ICD <- current_icd
+        mean_wt_pred$age <- current_age
+        mean_wt_pred$WT <- "mean"
+        median_wt_pred <- mean_wt_pred
+        median_wt_pred$WT <- "median"
+        seven_wt_pred <- mean_wt_pred
+        seven_wt_pred$WT <- "seven"
+        mean_wt_pred$reg_week <- forecast_week_nums
+        median_wt_pred$reg_week <- forecast_week_nums
+        seven_wt_pred$reg_week <- forecast_week_nums
+        
+        tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, seven_wt_pred, actual_dat)
+        
+        graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:9])
+        graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
+        
+        
+        whole_df <- dplyr::bind_rows(whole_df, graphing_df)
+        coef_df <- dplyr::bind_rows(coef_df, current_coef_df)
+        
+        next()
+        
+      }
       
       
       hes_data$stay <- hes_data$cc_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
+      hes_data[hes_data$stay > upper_day_bound,"stay"]<- upper_day_bound
       
       
       
@@ -2029,15 +2086,65 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
       tic("Set up outcome variable")
       hes_data$outcome <- NA
       
-      hes_data[hes_data$GA_LoS >= 7 ,"outcome"]<-"GA"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 2,"outcome"] <- "CC"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+      seven_day_seq <- seq(0, 42, 7)
+      lower_day_bound <- seven_day_seq[week_num]
+      upper_day_bound <- seven_day_seq[week_num + 1]
+      
+      hes_data[hes_data$GA_LoS >= upper_day_bound ,"outcome"]<-"GA"
+      hes_data[hes_data$GA_LoS >= lower_day_bound & hes_data$GA_LoS < upper_day_bound & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+      hes_data[hes_data$GA_LoS >= lower_day_bound & hes_data$GA_LoS < upper_day_bound & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+      hes_data[hes_data$GA_LoS >= lower_day_bound & hes_data$GA_LoS < upper_day_bound & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+      
+      if(length(which(is.na(hes_data$outcome))) > 0)
+        hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+      
+      if(nrow(hes_data) == 0){
+        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
+        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
+        actual_dat$reg_week <- forecast_week_nums
+        actual_dat[,2:5] <- 0
+        actual_dat$WT <- "actual"
+        actual_dat$patient_group <- patient_group[j]
+        
+        current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
+        colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
+        current_coef_df$transition <- c("CC","GA","Dead","Discharged")
+        current_coef_df$patient_group <- patient_group[j]
+        current_coef_df$ICD <- current_icd
+        current_coef_df$age <- current_age
+        
+        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
+        colnames(out_df) <- c("GA","Dead","CC","Discharged")
+        mean_wt_pred <- as.data.frame(out_df)
+        mean_wt_pred$patient_group <- patient_group[j]
+        mean_wt_pred$ICD <- current_icd
+        mean_wt_pred$age <- current_age
+        mean_wt_pred$WT <- "mean"
+        median_wt_pred <- mean_wt_pred
+        median_wt_pred$WT <- "median"
+        seven_wt_pred <- mean_wt_pred
+        seven_wt_pred$WT <- "seven"
+        mean_wt_pred$reg_week <- forecast_week_nums
+        median_wt_pred$reg_week <- forecast_week_nums
+        seven_wt_pred$reg_week <- forecast_week_nums
+        
+        tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, seven_wt_pred, actual_dat)
+        
+        graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:9])
+        graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
+        
+        
+        whole_df <- dplyr::bind_rows(whole_df, graphing_df)
+        coef_df <- dplyr::bind_rows(coef_df, current_coef_df)
+        
+        next()
+          
+      }
       
       
       
       hes_data$stay <- hes_data$GA_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
+      hes_data[hes_data$stay > upper_day_bound,"stay"]<-upper_day_bound
       
       
       
@@ -2049,8 +2156,8 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
     }
     ## set up week and year fixed effects
     
-    forecast_week_start <- week_num_func(forecast_start,"2009-01-01")
-    forecast_week_end <- week_num_func(forecast_seq[forecast_length],"2009-01-01")
+    forecast_week_start <- week_num_func(forecast_start,start_date)
+    forecast_week_end <- week_num_func(forecast_seq[forecast_length],start_date)
     forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
     
     
@@ -2089,10 +2196,13 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
       reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome","WaitingTime"))]
     }
     
+    transformation <- function(x){x}
     if(wt_variable == "squared"){
       reg_data_no_stay$WaitingTime <- reg_data_no_stay$WaitingTime^2 
+      transformation <- function(x){x^2}
     }else if(wt_variable == "log"){
       reg_data_no_stay$WaitingTime <- log(reg_data_no_stay$WaitingTime)
+      transformation <- function(x){log(x)}
     }
       
     
@@ -2241,7 +2351,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         actual_dat$patient_group <- patient_group[j]
         colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
         
-        means$WaitingTime <- mean(reg_data_no_stay$WaitingTime, na.rm = TRUE)
+        means$WaitingTime <- transformation(mean(hes_data$WaitingTime, na.rm = TRUE))
         means$reg_week <- forecast_week_nums
         month_nums <- month(forecast_seq)
         for(k in 1:length(month_nums)){
@@ -2283,7 +2393,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         mean_wt_pred$WT <- "mean"
         # Or calculate it at the median
         medians <- means
-        medians$WaitingTime <- median(reg_data_no_stay$WaitingTime)
+        medians$WaitingTime <- transformation(median(hes_data$WaitingTime))
         
         median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
         if (!is.matrix(median_wt_pred)){
@@ -2318,7 +2428,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         ## 7 day average
         
         seven_days <- means
-        seven_days$WaitingTime <- 7
+        seven_days$WaitingTime <- transformation(7)
         
         seven_wt_pred <- predict(ml_stay, newdata = seven_days, "probs")
         if (!is.matrix(seven_wt_pred)){
@@ -2388,6 +2498,8 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
         
         means$reg_week <- forecast_week_nums
+        means$WaitingTime <- transformation(mean(hes_data$WaitingTime, na.rm = TRUE))
+        
         
         mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
         if (!is.matrix(mean_wt_pred)){
@@ -2419,7 +2531,10 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         mean_wt_pred$age <- current_age
         mean_wt_pred$WT <- "mean"
         # Or calculate it at the median
+        
         medians <- means
+        medians$WaitingTime <- transformation(median(hes_data$WaitingTime, na.rm = TRUE))
+        
         
         median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
         if (!is.matrix(median_wt_pred)){
@@ -2454,7 +2569,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         ## 7 day average
         
         seven_days <- means
-        seven_days$WaitingTime <- 7
+        seven_days$WaitingTime <- transformation(7)
         
         seven_wt_pred <- predict(ml_stay, newdata = seven_days, "probs")
         if (!is.matrix(seven_wt_pred)){
@@ -2535,6 +2650,9 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
           
         }
         
+        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
+        
+        means$WaitingTime <- transformation(mean(hes_data$WaitingTime, na.rm = TRUE))
         
         mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
         if (!is.matrix(mean_wt_pred)){
@@ -2567,7 +2685,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         mean_wt_pred$WT <- "mean"
         # Or calculate it at the median
         medians <- means
-        
+        medians$WaitingTime <- transformation(median(hes_data$WaitingTime, na.rm = TRUE))
         median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
         if (!is.matrix(median_wt_pred)){
           out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
@@ -2601,7 +2719,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         ## 7 day average
         
         seven_days <- means
-        seven_days$WaitingTime <- 7
+        seven_days$WaitingTime <- transformation(7)
         
         seven_wt_pred <- predict(ml_stay, newdata = seven_days, "probs")
         if (!is.matrix(seven_wt_pred)){
@@ -2672,6 +2790,10 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         actual_dat$patient_group <- patient_group[j]
         colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
         
+        means$WaitingTime <- transformation(mean(hes_data$WaitingTime, na.rm = TRUE))
+        
+        
+        
         mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
         if (!is.matrix(mean_wt_pred)){
           out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
@@ -2703,6 +2825,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         mean_wt_pred$WT <- "mean"
         # Or calculate it at the median
         medians <- means
+        medians$WaitingTime <- transformation(median(hes_data$WaitingTime, na.rm = TRUE))
         
         median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
         if (!is.matrix(median_wt_pred)){
@@ -2737,7 +2860,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         ## 7 day average
         
         seven_days <- means
-        seven_days$WaitingTime <- 7
+        seven_days$WaitingTime <- transformation(7)
         
         seven_wt_pred <- predict(ml_stay, newdata = seven_days, "probs")
         if (!is.matrix(seven_wt_pred)){
@@ -2801,7 +2924,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
 }
 
 emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
-                                         time_trend = TRUE, month_trend = TRUE){
+                                         time_trend = TRUE, month_trend = TRUE, week_num){
   ## Input ICD hes data for one ICD one age group one patient group (cc/ga)
   ## to be run in parrallel
   tic("Whole process")
@@ -2818,6 +2941,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
     print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
     tic(paste("Running for patient group:",patient_group[j]))
     
+
     split_patient_group <- str_split_fixed(patient_group[j], "-",3)
     current_icd <- as.integer(split_patient_group[1])
     current_ward <- split_patient_group[2]
@@ -2849,15 +2973,58 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
       tic("Set up outcome variable")
       hes_data$outcome <- NA
       
-      hes_data[hes_data$cc_LoS >= 7 ,"outcome"]<-"CC"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 2,"outcome"] <- "GA"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+      days_of_stay_variable <- seq(0, 42, 7)
+      lower_end_stay <- days_of_stay_variable[week_num]
+      upper_end_stay <- days_of_stay_variable[week_num + 1]
       
+      
+      hes_data[hes_data$cc_LoS >= upper_end_stay ,"outcome"]<-"CC"
+      hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+      hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+      hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+      
+      if(length(which(is.na(hes_data$outcome))) > 0)
+        hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+      
+      if(nrow(hes_data) == 0){
+        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
+        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
+        actual_dat$reg_week <- forecast_week_nums
+        actual_dat[,2:5] <- 0
+        actual_dat$WT <- "actual"
+        actual_dat$patient_group <- patient_group[j]
+        
+        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
+        colnames(out_df) <- c("GA","Dead","CC","Discharged")
+        mean_wt_pred <- as.data.frame(out_df)
+        mean_wt_pred$patient_group <- patient_group[j]
+        mean_wt_pred$ICD <- current_icd
+        mean_wt_pred$age <- current_age
+        mean_wt_pred$WT <- "mean"
+        median_wt_pred <- mean_wt_pred
+        median_wt_pred$WT <- "median"
+        seven_wt_pred <- mean_wt_pred
+        seven_wt_pred$WT <- "seven"
+        mean_wt_pred$reg_week <- forecast_week_nums
+        median_wt_pred$reg_week <- forecast_week_nums
+        seven_wt_pred$reg_week <- forecast_week_nums
+        
+        tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, seven_wt_pred, actual_dat)
+        
+        graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:9])
+        graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
+        
+        
+        whole_df <- dplyr::bind_rows(whole_df, graphing_df)
+        
+        
+        next()
+        
+      }
       
       
       hes_data$stay <- hes_data$cc_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
+      hes_data[hes_data$stay > upper_end_stay,"stay"] <- upper_end_stay
       
       
       
@@ -2886,18 +3053,60 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
       tic("Set up outcome variable")
       hes_data$outcome <- NA
       
-      hes_data[hes_data$GA_LoS >= 7 ,"outcome"]<-"GA"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 2,"outcome"] <- "CC"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+      days_of_stay_variable <- seq(0, 42, 7)
+      lower_end_stay <- days_of_stay_variable[week_num]
+      upper_end_stay <- days_of_stay_variable[week_num + 1]
       
       
+      hes_data[hes_data$GA_LoS >= upper_end_stay ,"outcome"]<-"GA"
+      hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+      hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+      hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+        
+        
+      if(length(which(is.na(hes_data$outcome))) > 0)
+        hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+      
+      if(nrow(hes_data) == 0){
+        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
+        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
+        actual_dat$reg_week <- forecast_week_nums
+        actual_dat[,2:5] <- 0
+        actual_dat$WT <- "actual"
+        actual_dat$patient_group <- patient_group[j]
+        
+        
+        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
+        colnames(out_df) <- c("GA","Dead","CC","Discharged")
+        mean_wt_pred <- as.data.frame(out_df)
+        mean_wt_pred$patient_group <- patient_group[j]
+        mean_wt_pred$ICD <- current_icd
+        mean_wt_pred$age <- current_age
+        mean_wt_pred$WT <- "mean"
+        median_wt_pred <- mean_wt_pred
+        median_wt_pred$WT <- "median"
+        seven_wt_pred <- mean_wt_pred
+        seven_wt_pred$WT <- "seven"
+        mean_wt_pred$reg_week <- forecast_week_nums
+        median_wt_pred$reg_week <- forecast_week_nums
+        seven_wt_pred$reg_week <- forecast_week_nums
+        
+        tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, seven_wt_pred, actual_dat)
+        
+        graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:9])
+        graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
+        
+        
+        whole_df <- dplyr::bind_rows(whole_df, graphing_df)
+        
+        
+        next()
+        
+      }
       
       hes_data$stay <- hes_data$GA_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
+      hes_data[hes_data$stay > upper_end_stay ,"stay"] <- upper_end_stay
+        
       hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
       hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
       
@@ -2906,8 +3115,8 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
     }
     ## set up week and year fixed effects
     
-    forecast_week_start <- week_num_func(forecast_start,"2009-01-01")
-    forecast_week_end <- week_num_func(forecast_seq[forecast_length],"2009-01-01")
+    forecast_week_start <- week_num_func(forecast_start,start_date)
+    forecast_week_end <- week_num_func(forecast_seq[forecast_length],start_date)
     forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
     
     
@@ -3061,6 +3270,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
         actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
         actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
         actual_dat$WT <- "actual"
+        actual_dat$patient_group <- patient_group[j]
         
         
         
@@ -3398,7 +3608,6 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
     
     mean_wt_pred$reg_week <- forecast_week_nums
     median_wt_pred$reg_week <- forecast_week_nums
-    seven
     
     tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, actual_dat)
     
@@ -3419,7 +3628,8 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
 
 
 regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, forecast_start = "2012-03-05",
-                                      start_date = "2009-01-01", time_trend = TRUE, month_trend = TRUE, wt_variable = "linear"){
+                                      start_date = "2009-01-01", time_trend = TRUE, month_trend = TRUE, wt_variable = "linear",
+                                      week_num = 1){
 
   ## Takes in data and the patient group as either "elective" or "emergency"
   print("Listing the icds now") 
@@ -3443,7 +3653,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     patient_groups_to_run <- paste(icds_to_run,"ga",ages_to_run, sep = "-")
     patient_groups_to_run_cc <- paste(icds_to_run,"cc",ages_to_run, sep = "-")
     tot_patient_groups <- c(patient_groups_to_run, patient_groups_to_run_cc)
-    
+
     tic("Setting up elective cluster")
     regression_cluster <- snow::makeCluster(spec = 14, outfile = "./crr_cluster_log.txt")
     
@@ -3460,6 +3670,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     snow::clusterExport(regression_cluster, "time_trend", envir = environment())
     snow::clusterExport(regression_cluster, "month_trend", envir = environment())
     snow::clusterExport(regression_cluster, "wt_variable", envir = environment())
+    snow::clusterExport(regression_cluster, "week_num", envir = environment())
+    
     copy_end <- Sys.time()
     print(copy_end - copy_start)
     snow::clusterEvalQ(regression_cluster, require(dplyr))
@@ -3478,7 +3690,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
                                             forecast_length = forecast_length, forecast_start = forecast_start,
                                             start_date = start_date, time_trend = time_trend,
                                             month_trend = month_trend,
-                                            wt_variable = wt_variable)
+                                            wt_variable = wt_variable,
+                                            week_num = week_num)
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
     snow::clusterEvalQ(regression_cluster, rm(hes_data))
@@ -3512,7 +3725,6 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     icd_15_age_3_rm <- which(tot_patient_groups %in% c("15-ga-3","15-cc-3"))
     tot_patient_groups <- tot_patient_groups[-icd_15_age_3_rm]
     print(length(tot_patient_groups))
-
     toc()
     tic("Setting up Emergency cluster")
     regression_cluster <- snow::makeCluster(spec = 15, outfile = "./crr_cluster_log.txt")
@@ -3529,6 +3741,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     snow::clusterExport(regression_cluster, "start_date", envir = environment())
     snow::clusterExport(regression_cluster, "time_trend", envir = environment())
     snow::clusterExport(regression_cluster, "month_trend", envir = environment())
+    snow::clusterExport(regression_cluster, "week_num", envir = environment())
+    snow::clusterExport(regression_cluster, "wt_variable", envir = environment())
     copy_end <- Sys.time()
     print(copy_end - copy_start)
     snow::clusterEvalQ(regression_cluster, require(dplyr))
@@ -3546,7 +3760,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
                                                    hes_data_orig = hes_data,
                                                    forecast_length = forecast_length, forecast_start = forecast_start,
                                                    start_date = start_date, time_trend = time_trend,
-                                                   month_trend = month_trend)
+                                                   month_trend = month_trend,
+                                                   week_num = week_num)
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
     snow::clusterEvalQ(regression_cluster, rm(hes_data))
@@ -3574,10 +3789,15 @@ multi_graph_plotter <- function(reg_res, out_file, trend_types = "month and time
   pdf(file = out_file, paper = "A4r", width = 10, height = 7)  
   
   patient_groupings <- unique(reg_res$patient_group)
+  if(length(which(is.na(patient_groupings))) > 0)
+    patient_groupings <- patient_groupings[-which(is.na(patient_groupings))]
   
   for(k in 1:length(patient_groupings)){
     current_grouping <- patient_groupings[k]
     current_graph_df <- reg_res[reg_res$patient_group == current_grouping,]
+    if(length(which(is.na(current_graph_df$patient_group))) > 0)
+      current_graph_df <- current_graph_df[-which(is.na(current_graph_df$patient_group)),]
+    
     
     graph_plot <- ggplot(data = current_graph_df, aes(x = reg_week, y = value, group = line_group)) +
       geom_line(aes(color = variable, linetype = WT)) + theme_bw() +

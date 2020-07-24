@@ -52,12 +52,12 @@ vroom_write(transitions_data,
 elective_no_trends <- regression_cluster_set_up(patient_group = "elective",
                                                 hes_data = transitions_data, forecast_length = 52,
                                                 forecast_start = forecast_start_date,
-                                                month_trend = FALSE, time_trend = FALSE)
+                                                month_trend = FALSE, time_trend = FALSE, week_num = 1, wt_variable = "squared")
 
 emergency_no_trends <- regression_cluster_set_up(patient_group = "emergency",
                                                  hes_data = transitions_data, forecast_length = 52,
                                                  forecast_start = forecast_start_date,
-                                                 month_trend = FALSE, time_trend = FALSE)
+                                                 month_trend = FALSE, time_trend = FALSE, week_num = 1)
 failure_func <- failure_func_setup(transitions_data, month_trend = FALSE,
                                    time_trend = FALSE)
 
