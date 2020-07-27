@@ -135,7 +135,7 @@ week_num_func <- function(current_week,start_week){
   
 }
 
-covid_regression <- function(covid_data){
+covid_regression <- function(covid_data, week_num = c(1,2,3,4,5)){
   ## Assume COVID data has the following variables:
   ## GA_LoS - Length of stay in days for G&A patients
   ## cc_LoS - Length of stay in days for CC patients
@@ -147,139 +147,230 @@ covid_regression <- function(covid_data){
   
   ## Create output table 
   
-  out_df <- data.frame(matrix(ncol = 4, nrow = 24))
-  colnames(out_df) <- c("a", "p",	"s",	"sbar",	"pi_y",	"coeff","	variance")
-  out_df$a <- "N"
-  out_df$p <- paste("COVID_",rep(c("AGE1","AGE2","AGE3"),each = 8), sep = "")
-  out_df$s <- rep(rep(c("G","C"), each = 4), 3)
-  out_df$sbar <- rep(c("H","C","D","G","H","G","D","C"), 3)
+  tot_out_df <- NULL
   
-  
-  
-  ## create count variable
-  
-  covid_data$one <- 1
-  
-  
-  ## Create the separate cc and ga datasets and outcome variable by day 7
-  
-  covid_cc <- covid_data[covid_data$cc == 1,]
-  
-  covid_ga <- covid_data[-which(is.na(covid_data$ga_transitions)),]
-  
-  covid_cc$outcome <- NA
-  
-  
-  covid_cc[covid_cc$cc_LoS >= 7 ,"outcome"]<-"CC"
-  covid_cc[covid_cc$cc_LoS >= 0 & covid_cc$cc_LoS < 7 & covid_cc$cc_transitions == 3,"outcome"] <- "Dead"
-  covid_cc[covid_cc$cc_LoS >= 0 & covid_cc$cc_LoS < 7 & covid_cc$cc_transitions == 2,"outcome"] <- "GA"
-  covid_cc[covid_cc$cc_LoS >= 0 & covid_cc$cc_LoS < 7 & covid_cc$cc_transitions == 1,"outcome"] <- "Discharged"
-  
-  covid_ga$outcome <- NA
-  
-  covid_ga[covid_ga$GA_LoS >= 7 ,"outcome"]<-"GA"
-  covid_ga[covid_ga$GA_LoS >= 0 & covid_ga$GA_LoS < 7 & covid_ga$ga_transitions == 3,"outcome"] <- "Dead"
-  covid_ga[covid_ga$GA_LoS >= 0 & covid_ga$GA_LoS < 7 & covid_ga$ga_transitions == 2,"outcome"] <- "CC"
-  covid_ga[covid_ga$GA_LoS >= 0 & covid_ga$GA_LoS < 7 & covid_ga$ga_transitions == 1,"outcome"] <- "Discharged"
-  
-  covid_cc$death <- ifelse(covid_cc$outcome == "Dead" , 1,0)
-  covid_cc$discharges <- ifelse(covid_cc$outcome == "Discharged", 1, 0)
-  covid_cc$ward_switch <- ifelse(covid_cc$outcome == "GA", 1, 0)
-  covid_cc$remain <- ifelse(covid_cc$outcome == "CC", 1, 0)
-  
-  covid_ga$death <- ifelse(covid_ga$outcome == "Dead" , 1,0)
-  covid_ga$discharges <- ifelse(covid_ga$outcome == "Discharged", 1, 0)
-  covid_ga$ward_switch <- ifelse(covid_ga$outcome == "CC", 1, 0)
-  covid_ga$remain <- ifelse(covid_ga$outcome == "GA", 1, 0)
-  
-  
-  ## GA transitions 
-  
-  tot_ages <- aggregate(one ~ agegrp_v3, covid_ga, sum)$one
-  ga_deaths <- aggregate(death ~ agegrp_v3, covid_ga, sum)$death
-  ga_discharges <- aggregate(discharges ~ agegrp_v3, covid_ga, sum)$discharges
-  ga_cc <- aggregate(ward_switch ~ agegrp_v3, covid_ga, sum)$ward_switch
-  ga_ga <- aggregate(remain ~ agegrp_v3, covid_ga, sum)$ward_switch
-  
-  
-  age_1_dat <- c(ga_discharges[1] / tot_ages[1], ga_cc[1] / tot_ages[1], 
-                 ga_deaths[1] / tot_ages[1], ga_ga[1] / tot_ages[1])
-  age_2_dat <- c(ga_discharges[2] / tot_ages[2], ga_cc[2] / tot_ages[2], 
-                 ga_deaths[2] / tot_ages[2], ga_ga[2] / tot_ages[2])
-  age_3_dat <- c(ga_discharges[3] / tot_ages[3], ga_cc[3] / tot_ages[3], 
-                 ga_deaths[3] / tot_ages[3], ga_ga[3] / tot_ages[3])
-  
-  GA_dat <- c(age_1_dat, age_2_dat, age_3_dat)
-  out_df[c(1:4,9:12,17:20),"coeff"] <- GA_dat
-  
-  ## CC transitions
-  
-  tot_ages <- aggregate(one ~ agegrp_v3, covid_cc, sum)$one
-  
-  ## Check if any missing ages 
-  
-  if(length(tot_ages) != 3){
-    missing_age <- c(1,2,3)[which(!(c(1,2,3) %in% covid_cc$agegrp_v3))]
+  for(j in 1:length(week_num)){
     
-    ## get index of missing age to replace with 0 
+    out_df <- data.frame(matrix(ncol = 7, nrow = 24))
+    colnames(out_df) <- c("a", "p",	"s",	"sbar",	"pi_y",	"coeff","	variance")
+    out_df$a <- "N"
+    out_df$p <- paste("COVID_",rep(c("AGE1","AGE2","AGE3"),each = 8), sep = "")
+    out_df$s <- rep(rep(c("G","C"), each = 4), 3)
+    out_df$sbar <- rep(c("H","C","D","G","H","G","D","C"), 3)
     
-    tot_ages <- append(tot_ages, 0)
-    if(missing_age == 1){
-      seq_order <- c(3,1,2)
-    }else if(missing_age == 2){
-      seq_order <- c(1,3,2)
-    }else if(missing_age == 3){
-      seq_order <- c(1,2,3)
-    }
+    
+    
+    ## create count variable
+    
+    covid_data$one <- 1
+    
+    
+    ## Create the separate cc and ga datasets and outcome variable by day 7
+    
+    covid_cc <- covid_data[covid_data$cc == 1,]
+    
+    covid_ga <- covid_data[-which(is.na(covid_data$ga_transitions)),]
+    
+    covid_cc$outcome <- "NA"
+    seven_seq <- seq(0, (7*week_num[length(week_num)]),7)
+    lower_day_bound <- seven_seq[j]
+    upper_day_bound <- seven_seq[j + 1]
+    
+    skip_cc <- FALSE
+    
+    covid_cc[covid_cc$cc_LoS >= upper_day_bound ,"outcome"]<-"CC"
+    covid_cc[covid_cc$cc_LoS >= lower_day_bound & covid_cc$cc_LoS < upper_day_bound & covid_cc$cc_transitions == 3,"outcome"] <- "Dead"
+    covid_cc[covid_cc$cc_LoS >= lower_day_bound & covid_cc$cc_LoS < upper_day_bound & covid_cc$cc_transitions == 2,"outcome"] <- "GA"
+    covid_cc[covid_cc$cc_LoS >= lower_day_bound & covid_cc$cc_LoS < upper_day_bound & covid_cc$cc_transitions == 1,"outcome"] <- "Discharged"
+    
+    ## Check there's any data to get proportions from 
+    
+    
+    if(length(which(covid_cc$outcome == "NA")) > 0)
+      covid_cc <- covid_cc[-which(covid_cc$outcome == "NA"),]
+    
+    
+    ## If there is no data then we'll set all the probs to 0
+    
+    if(nrow(covid_cc) == 0){
       
-    tot_ages <- tot_ages[seq_order]
-    
-    cc_deaths <- aggregate(death ~ agegrp_v3, covid_cc, sum)$death
-    cc_deaths <- append(cc_deaths, 0)[seq_order]
-    cc_discharges <- aggregate(discharges ~ agegrp_v3, covid_cc, sum)$discharges
-    cc_discharges <- append(cc_discharges, 0)[seq_order]
-    cc_cc <- aggregate(remain ~ agegrp_v3, covid_cc, sum)$ward_switch
-    cc_cc <- append(cc_cc, 0)[seq_order]
-    cc_ga <- aggregate(ward_switch ~ agegrp_v3, covid_cc, sum)$ward_switch
-    cc_ga <- append(cc_ga, 0)[seq_order]
+      skip_cc <- TRUE
+      out_df[c(5:8,13:16,21:24),"coeff"] <- 0
+      out_df$week <- j
+      
+    }
     
     
-    cc_dat <- NULL
-    for(k in 1:3){
-      if(k %in% missing_age){
-        age_dat <- rep(0, 8)
+    skip_ga <- FALSE
+    
+    covid_ga$outcome <- "NA"
+    
+    covid_ga[covid_ga$GA_LoS >= upper_day_bound ,"outcome"]<-"GA"
+    covid_ga[covid_ga$GA_LoS >= lower_day_bound & covid_ga$GA_LoS < upper_day_bound & covid_ga$ga_transitions == 3,"outcome"] <- "Dead"
+    covid_ga[covid_ga$GA_LoS >= lower_day_bound & covid_ga$GA_LoS < upper_day_bound & covid_ga$ga_transitions == 2,"outcome"] <- "CC"
+    covid_ga[covid_ga$GA_LoS >= lower_day_bound & covid_ga$GA_LoS < upper_day_bound & covid_ga$ga_transitions == 1,"outcome"] <- "Discharged"
+    
+    if(length(which(covid_ga$outcome == "NA")) > 0)
+      covid_ga <- covid_ga[-which(covid_ga$outcome == "NA"),]
+    
+    
+    ## If there is no data then we'll set all the probs to 0
+    
+    if(nrow(covid_ga) == 0){
+      
+      skip_ga <- TRUE
+      out_df[c(1:4,9:12,17:20),"coeff"] <- 0
+      out_df$week <- j
+      
+      skip_ga <- TRUE
+      
+    }
+    
+    if(skip_ga == FALSE){
+    
+      covid_ga$death <- ifelse(covid_ga$outcome == "Dead" , 1,0)
+      covid_ga$discharges <- ifelse(covid_ga$outcome == "Discharged", 1, 0)
+      covid_ga$ward_switch <- ifelse(covid_ga$outcome == "CC", 1, 0)
+      covid_ga$remain <- ifelse(covid_ga$outcome == "GA", 1, 0)
+      
+      
+      ## GA transitions 
+      
+      tot_ages <- aggregate(one ~ agegrp_v3, covid_ga, sum)$one
+      
+      if(length(tot_ages) != 3){
+        missing_age <- c(1,2,3)[which(!(c(1,2,3) %in% covid_ga$agegrp_v3))]
+        present_age <- c(1,2,3)[which((c(1,2,3) %in% covid_ga$agegrp_v3))]
+        ## get index of missing age to replace with 0 
+        
+        tot_ages_agg <- tot_ages
+        tot_ages <- rep(0,3)
+        tot_ages[present_age] <- tot_ages_agg
+        
+        ga_deaths <- rep(0,3)
+        ga_deaths_agg <- aggregate(death ~ agegrp_v3, covid_ga, sum)$death
+        ga_deaths[present_age] <- ga_deaths_agg
+        ga_discharges <- rep(0,3)
+        ga_discharges_agg <- aggregate(discharges ~ agegrp_v3, covid_ga, sum)$discharges
+        ga_discharges[present_age] <- ga_discharges_agg
+        ga_ga <- rep(0,3)
+        ga_ga_agg <- aggregate(remain ~ agegrp_v3, covid_ga, sum)$remain
+        ga_ga[present_age] <- ga_ga_agg
+        ga_cc <- rep(0,3)
+        ga_cc_agg <- aggregate(ward_switch ~ agegrp_v3, covid_ga, sum)$ward_switch
+        ga_cc[present_age] <- ga_cc_agg
+        
+        
+        ga_dat <- NULL
+        for(k in 1:3){
+          if(k %in% missing_age){
+            age_dat <- rep(0, 4)
+          }else{
+            age_dat <- c(ga_discharges[k] / tot_ages[k], ga_cc[k] / tot_ages[k], 
+                         ga_deaths[k] / tot_ages[k], ga_ga[k] / tot_ages[k])
+          }
+          
+          ga_dat <- append(ga_dat, age_dat)
+        }
+        
+        
       }else{
-        age_dat <- c(cc_discharges[k] / tot_ages[k], cc_ga[k] / tot_ages[k], 
-                     cc_deaths[k] / tot_ages[k], cc_ga[k] / tot_ages[k])
+        
+        
+        ga_deaths <- aggregate(death ~ agegrp_v3, covid_ga, sum)$death
+        ga_discharges <- aggregate(discharges ~ agegrp_v3, covid_ga, sum)$discharges
+        ga_ga <- aggregate(remain ~ agegrp_v3, covid_ga, sum)$remain
+        ga_cc <- aggregate(ward_switch ~ agegrp_v3, covid_ga, sum)$ward_switch
+        
+        age_1_dat <- c(ga_discharges[1] / tot_ages[1], ga_cc[1] / tot_ages[1], 
+                       ga_deaths[1] / tot_ages[1], ga_ga[1] / tot_ages[1])
+        age_2_dat <- c(ga_discharges[2] / tot_ages[2], ga_cc[2] / tot_ages[2], 
+                       ga_deaths[2] / tot_ages[2], ga_ga[2] / tot_ages[2])
+        age_3_dat <- c(ga_discharges[3] / tot_ages[3], ga_cc[3] / tot_ages[3], 
+                       ga_deaths[3] / tot_ages[3], ga_ga[3] / tot_ages[3])
+        ga_dat <- c(age_1_dat, age_2_dat, age_3_dat)
       }
       
-      cc_dat <- append(cc_dat, age_dat)
+      out_df[c(1:4,9:12,17:20),"coeff"] <- ga_dat
+    }
+    ## CC transitions
+    
+    if(skip_cc == FALSE){
+      
+      covid_cc$death <- ifelse(covid_cc$outcome == "Dead" , 1,0)
+      covid_cc$discharges <- ifelse(covid_cc$outcome == "Discharged", 1, 0)
+      covid_cc$ward_switch <- ifelse(covid_cc$outcome == "GA", 1, 0)
+      covid_cc$remain <- ifelse(covid_cc$outcome == "CC", 1, 0)
+      
+      
+      
+      tot_ages <- aggregate(one ~ agegrp_v3, covid_cc, sum)$one
+      
+      ## Check if any missing ages 
+      
+      if(length(tot_ages) != 3){
+        missing_age <- c(1,2,3)[which(!(c(1,2,3) %in% covid_cc$agegrp_v3))]
+        present_age <- c(1,2,3)[which((c(1,2,3) %in% covid_cc$agegrp_v3))]
+        ## get index of missing age to replace with 0 
+        
+        tot_ages_agg <- tot_ages
+        tot_ages <- rep(0,3)
+        tot_ages[present_age] <- tot_ages_agg
+        
+        cc_deaths <- rep(0,3)
+        cc_deaths_agg <- aggregate(death ~ agegrp_v3, covid_cc, sum)$death
+        cc_deaths[present_age] <- cc_deaths_agg
+        cc_discharges <- rep(0,3)
+        cc_discharges_agg <- aggregate(discharges ~ agegrp_v3, covid_cc, sum)$discharges
+        cc_discharges[present_age] <- cc_discharges_agg
+        cc_cc <- rep(0,3)
+        cc_cc_agg <- aggregate(remain ~ agegrp_v3, covid_cc, sum)$remain
+        cc_cc[present_age] <- cc_cc_agg
+        cc_ga <- rep(0,3)
+        cc_ga_agg <- aggregate(ward_switch ~ agegrp_v3, covid_cc, sum)$ward_switch
+        cc_ga[present_age] <- cc_ga_agg
+        
+        
+        cc_dat <- NULL
+        for(k in 1:3){
+          if(k %in% missing_age){
+            age_dat <- rep(0, 4)
+          }else{
+            age_dat <- c(cc_discharges[k] / tot_ages[k], cc_ga[k] / tot_ages[k], 
+                         cc_deaths[k] / tot_ages[k], cc_ga[k] / tot_ages[k])
+          }
+          
+          cc_dat <- append(cc_dat, age_dat)
+        }
+        
+                            
+      }else{
+      
+      
+        cc_deaths <- aggregate(death ~ agegrp_v3, covid_cc, sum)$death
+        cc_discharges <- aggregate(discharges ~ agegrp_v3, covid_cc, sum)$discharges
+        cc_cc <- aggregate(remain ~ agegrp_v3, covid_cc, sum)$remain
+        cc_ga <- aggregate(ward_switch ~ agegrp_v3, covid_cc, sum)$ward_switch
+        
+        age_1_dat <- c(cc_discharges[1] / tot_ages[1], cc_ga[1] / tot_ages[1], 
+                       cc_deaths[1] / tot_ages[1], cc_ga[1] / tot_ages[1])
+        age_2_dat <- c(cc_discharges[2] / tot_ages[2], cc_ga[2] / tot_ages[2], 
+                       cc_deaths[2] / tot_ages[2], cc_ga[2] / tot_ages[2])
+        age_3_dat <- c(cc_discharges[3] / tot_ages[3], cc_ga[3] / tot_ages[3], 
+                       cc_deaths[3] / tot_ages[3], cc_ga[3] / tot_ages[3])
+        cc_dat <- c(age_1_dat, age_2_dat, age_3_dat)
+      }
+      
+      
+      
+      out_df[c(5:8,13:16,21:24),"coeff"] <- cc_dat
     }
     
-                        
-  }else{
-  
-  
-    cc_deaths <- aggregate(death ~ agegrp_v3, covid_cc, sum)$death
-    cc_discharges <- aggregate(discharges ~ agegrp_v3, covid_cc, sum)$discharges
-    cc_cc <- aggregate(remain ~ agegrp_v3, covid_cc, sum)$ward_switch
-    cc_ga <- aggregate(ward_switch ~ agegrp_v3, covid_cc, sum)$ward_switch
-    
-    age_1_dat <- c(cc_discharges[1] / tot_ages[1], cc_ga[1] / tot_ages[1], 
-                   cc_deaths[1] / tot_ages[1], cc_ga[1] / tot_ages[1])
-    age_2_dat <- c(cc_discharges[2] / tot_ages[2], cc_ga[2] / tot_ages[2], 
-                   cc_deaths[2] / tot_ages[2], cc_ga[2] / tot_ages[2])
-    age_3_dat <- c(cc_discharges[3] / tot_ages[3], cc_ga[3] / tot_ages[3], 
-                   cc_deaths[3] / tot_ages[3], cc_ga[3] / tot_ages[3])
-    cc_dat <- c(age_1_dat, age_2_dat, age_3_dat)
+    tot_out_df <- dplyr::bind_rows(tot_out_df, out_df)
   }
   
   
-  
-  out_df[c(5:8,13:16,21:24),"coeff"] <- cc_dat
-  
-  
-  return(out_df)
+  return(tot_out_df)
   
   
 }
@@ -2551,7 +2642,31 @@ failure_function <- function(cohort23, csv_survial_name,
 }
 
 
-
+reg_data_summariser <- function(reg_data,admi_type){
+  
+  
+  icds_in_play <- unique(reg_data[reg_data$WT == "mean","ICD"])
+    
+  row_nums <- length(icds_in_play) * 8 * 3
+  
+  icd_names <- icds_in_play
+  for(k in 1:length(icd_names)){
+    if(nchar(icd_names[k]) == 1)
+      icd_names[k] <- paste("0",icd_names[k], sep = "")
+  }
+  
+  
+  
+  out_df <- data.frame(matrix(ncol = 7, nrow = row_nums))
+  colnames(out_df) <- c("a", "p",	"s",	"sbar",	"pi_y",	"coeff","	variance")
+  out_df$a <- admi_type
+  out_df$p <- paste("COVID_",rep(c("AGE1","AGE2","AGE3"),each = 8), sep = "")
+  out_df$s <- rep(rep(c("G","C"), each = 4), 3)
+  out_df$sbar <- rep(c("H","C","D","G","H","G","D","C"), 3)
+  
+  
+  
+}
 
 
 
