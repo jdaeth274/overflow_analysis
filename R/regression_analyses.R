@@ -135,1801 +135,158 @@ week_num_func <- function(current_week,start_week){
   
 }
 
-
-
-
-elective_regression <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
-                                results_pdf = "D:/Dropbox/COVID19/Overflow/regressions_ga_output.pdf"){
-  ## Input ICD hes data for one ICD one age group one patient group (cc/ga)
-  ## to be run in parrallel
-  tic("Whole process")
-  whole_df <- NULL
-  forecast_seq <- seq(as.Date(forecast_start), by = "week", length.out = 52)
+covid_regression <- function(covid_data){
+  ## Assume COVID data has the following variables:
+  ## GA_LoS - Length of stay in days for G&A patients
+  ## cc_LoS - Length of stay in days for CC patients
+  ## cc     - Flag if record for patient in CC, 1 = Yes, 0 = No
+  ## cc_transitions - Transitions for patients in cc 1 = Discharged straight from cc, 2 = to G&A, 3 = Death, NA for GA patients
+  ## ga_transitions - Transitions for patients in GA 1 = Discharged, 2 = to CC, 3 = death, NA for cc patients
+  ## agegrp_v3 - what agegrp patient in, 1 = 0-24, 2 = 25-64, 3 = 65+
   
-  pdf(file = results_pdf, paper = "A4r", width = 10, height = 7)  
   
-  for(j in 1:length(patient_group)){
-    print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
-    tic(paste("Running for patient group:",patient_group[j]))
+  ## Create output table 
+  
+  out_df <- data.frame(matrix(ncol = 4, nrow = 24))
+  colnames(out_df) <- c("a", "p",	"s",	"sbar",	"pi_y",	"coeff","	variance")
+  out_df$a <- "N"
+  out_df$p <- paste("COVID_",rep(c("AGE1","AGE2","AGE3"),each = 8), sep = "")
+  out_df$s <- rep(rep(c("G","C"), each = 4), 3)
+  out_df$sbar <- rep(c("H","C","D","G","H","G","D","C"), 3)
+  
+  
+  
+  ## create count variable
+  
+  covid_data$one <- 1
+  
+  
+  ## Create the separate cc and ga datasets and outcome variable by day 7
+  
+  covid_cc <- covid_data[covid_data$cc == 1,]
+  covid_ga <- covid_data[covid_data$cc == 0,]
+  
+  covid_cc$outcome <- NA
+  
+  
+  covid_cc[covid_cc$cc_LoS >= 7 ,"outcome"]<-"CC"
+  covid_cc[covid_cc$cc_LoS >= 0 & covid_cc$cc_LoS < 7 & covid_cc$cc_transitions == 3,"outcome"] <- "Dead"
+  covid_cc[covid_cc$cc_LoS >= 0 & covid_cc$cc_LoS < 7 & covid_cc$cc_transitions == 2,"outcome"] <- "GA"
+  covid_cc[covid_cc$cc_LoS >= 0 & covid_cc$cc_LoS < 7 & covid_cc$cc_transitions == 1,"outcome"] <- "Discharged"
+  
+  covid_ga$outcome <- NA
+  
+  covid_ga[covid_ga$cc_LoS >= 7 ,"outcome"]<-"GA"
+  covid_ga[covid_ga$cc_LoS >= 0 & covid_ga$cc_LoS < 7 & covid_ga$cc_transitions == 3,"outcome"] <- "Dead"
+  covid_ga[covid_ga$cc_LoS >= 0 & covid_ga$cc_LoS < 7 & covid_ga$cc_transitions == 2,"outcome"] <- "CC"
+  covid_ga[covid_ga$cc_LoS >= 0 & covid_ga$cc_LoS < 7 & covid_ga$cc_transitions == 1,"outcome"] <- "Discharged"
+  
+  covid_cc$death <- ifelse(covid_cc$outcome == "Dead" , 1,0)
+  covid_cc$discharges <- ifelse(covid_cc$outcome == "Discharged", 1, 0)
+  covid_cc$ward_switch <- ifelse(covid_cc$outcome == "GA", 1, 0)
+  covid_cc$remain <- ifelse(covid_cc$outcome == "CC", 1, 0)
+  
+  covid_ga$death <- ifelse(covid_ga$outcome == "Dead" , 1,0)
+  covid_ga$discharges <- ifelse(covid_ga$outcome == "Discharged", 1, 0)
+  covid_ga$ward_switch <- ifelse(covid_ga$outcome == "CC", 1, 0)
+  covid_ga$remain <- ifelse(covid_ga$outcome == "GA", 1, 0)
+  
+  
+  ## GA transitions 
+  
+  tot_ages <- aggregate(one ~ agegrp_v3, covid_ga, sum)$one
+  ga_deaths <- aggregate(death ~ agegrp_v3, covid_ga, sum)$death
+  ga_discharges <- aggregate(discharges ~ agegrp_v3, covid_ga, sum)$discharges
+  ga_cc <- aggregate(ward_switch ~ agegrp_v3, covid_ga, sum)$ward_switch
+  ga_ga <- aggregate(remain ~ agegrp_v3, covid_ga, sum)$ward_switch
+  
+  
+  age_1_dat <- c(ga_discharges[1] / tot_ages[1], ga_cc[1] / tot_ages[1], 
+                 ga_deaths[1] / tot_ages[1], ga_ga[1] / tot_ages[1])
+  age_2_dat <- c(ga_discharges[2] / tot_ages[2], ga_cc[2] / tot_ages[2], 
+                 ga_deaths[2] / tot_ages[2], ga_ga[2] / tot_ages[2])
+  age_3_dat <- c(ga_discharges[3] / tot_ages[3], ga_cc[3] / tot_ages[3], 
+                 ga_deaths[3] / tot_ages[3], ga_ga[3] / tot_ages[3])
+  
+  GA_dat <- c(age_1_dat, age_2_dat, age_3_dat)
+  out_df[c(1:4,9:12,17:20),"coeff"] <- GA_dat
+  
+  ## CC transitions
+  
+  tot_ages <- aggregate(one ~ agegrp_v3, covid_cc, sum)$one
+  
+  ## Check if any missing ages 
+  
+  if(length(tot_ages) != 3){
+    missing_age <- c(1,2,3)[which(!(c(1,2,3) %in% covid_cc$agegrp_v3))]
     
-    split_patient_group <- str_split_fixed(patient_group[j], "-",3)
-    current_icd <- as.integer(split_patient_group[1])
-    current_ward <- split_patient_group[2]
-    current_age <- as.integer(split_patient_group[3])
+    ## get index of missing age to replace with 0 
     
-    hes_data <- hes_data_orig[hes_data_orig$ICD == current_icd & 
-                                hes_data_orig$agegrp_v3 == current_age,]
+    tot_ages <- append(tot_ages, 0)
+    if(missing_age == 1){
+      seq_order <- c(3,1,2)
+    }else if(missing_age == 2){
+      seq_order <- c(1,3,2)
+    }else if(missing_age == 3){
+      seq_order <- c(1,2,3)
+    }
+      
+    tot_ages <- tot_ages[seq_order]
     
-    if(current_ward == "cc"){
-      
-      tic("Narrowing to CC only")
-      hes_data <- hes_data[hes_data$cc == 1,]
-      toc()
-      ## remove na trans
-      tic("Removing NAs")
-      na_rows <- which(is.na(hes_data$cc_transitions))
-      if(length(na_rows) > 0)
-        hes_data <- hes_data[-na_rows,]
-      
-      na_ga_los <- which(is.na(hes_data$cc_LoS))
-      if(length(na_ga_los) > 0)
-        hes_data <- hes_data[-na_ga_los,]
-      toc()
-      
-      ## set up week and year fixed effects
-      
-      tic("Getting the reg week data")
-      
-      hes_data$reg_week <- sapply(hes_data$admidate_MDY,week_num_func,start_week = start_date)
-      toc()
-      col_names <- NULL
-      
-  
-      
-      for(k in 2:length(month.name)){
-        col_name <- paste(month.name[k], "fixed_effect",sep = "_")
-        hes_data[,col_name] <- 0
-        hes_data[hes_data$admidate_MM == k,col_name] <- 1
-        col_names <- append(col_names, col_name)
-        
-      }
-      
-      
-      ## Set up the outcome variable 
-      tic("Set up outcome variable")
-      hes_data$outcome <- NA
-      
-      hes_data[hes_data$cc_LoS >= 7 ,"outcome"]<-"CC"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 2,"outcome"] <- "GA"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
-      
-      
-      
-      hes_data$stay <- hes_data$cc_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
-      hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
-      hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
-      
-      
-      toc()
-      ## set up the reg data 
-      tic("Reg set up")
-      
-      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c(col_names, "outcome","WaitingTime","reg_week"))]
-  
-      actual_prop_dat <- reg_data_no_stay
-      actual_prop_dat$one <- 1
-      actual_prop_dat_agg <- aggregate(one ~ reg_week, data = actual_prop_dat, FUN = sum)
-      actual_prop_dat_outcome <- aggregate(one ~ reg_week + outcome, data = actual_prop_dat, FUN = sum)
-      
-      toc()
-      
-      
-      outcomes_in_dat <- plyr::count(reg_data_no_stay$outcome)
-      ## Checking if enough outcomes for model else will return one for probs
-      
-      if(nrow(outcomes_in_dat) < 2){
-        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-        colnames(out_df) <- levels(hes_data$outcome)
-        out_df[,outcomes_in_dat[1,1]] <- 1
-        mean_wt_pred <- as.data.frame(out_df)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        median_wt_pred <- mean_wt_pred
-        
-        
+    cc_deaths <- aggregate(death ~ agegrp_v3, covid_cc, sum)$death
+    cc_deaths <- append(cc_deaths, 0)[seq_order]
+    cc_discharges <- aggregate(discharges ~ agegrp_v3, covid_cc, sum)$discharges
+    cc_discharges <- append(cc_discharges, 0)[seq_order]
+    cc_cc <- aggregate(remain ~ agegrp_v3, covid_cc, sum)$ward_switch
+    cc_cc <- append(cc_cc, 0)[seq_order]
+    cc_ga <- aggregate(ward_switch ~ agegrp_v3, covid_cc, sum)$ward_switch
+    cc_ga <- append(cc_ga, 0)[seq_order]
+    
+    
+    cc_dat <- NULL
+    for(k in 1:3){
+      if(k %in% missing_age){
+        age_dat <- rep(0, 8)
       }else{
-        
-        
-        
-        # ml depending on WT only
-        tic("Regreesion model fitting")
-        ml_stay <- multinom(outcome ~ ., data = reg_data_no_stay)
-        toc()
-        
-        # we can average the probability over WT
-        
-        
-        
-        # Or calculate it at the mean WT
-        tic("Probability creation")
-        means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-        forecast_week_start <- week_num_func(forecast_start,"2009-01-01")
-        forecast_week_end <- week_num_func(forecast_seq[forecast_length],"2009-01-01")
-        forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
-        
-        ## make the actual data df to compare to predictions 
-        
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-        
-        means$reg_week <- forecast_week_nums
-        month_nums <- month(forecast_seq)
-        for(k in 1:length(month_nums)){
-          current_month <- month_nums[k]
-          if(current_month != 1)
-            means[k,current_month + 1] <- 1
-          
-        }
-        
-        
-        means[,1] <- mean(reg_data_no_stay$WaitingTime)
-        
-        
-        
-        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-        if (!is.matrix(mean_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          mean_wt_pred <- out_df
-        }else if(ncol(mean_wt_pred) != 4){
-          
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(mean_wt_pred)){
-            out_df[,column] <- mean_wt_pred[,column]
-            
-          }
-          
-          mean_wt_pred <- out_df
-        }
-        
-        mean_wt_pred <- as.data.frame(mean_wt_pred)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        # Or calculate it at the median
-        medians <- means
-        medians$WaitingTime <- median(reg_data_no_stay$WaitingTime)
-        
-        
-        median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-        if (!is.matrix(median_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- median_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          median_wt_pred <- out_df
-        }else if(ncol(median_wt_pred) != 4){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(median_wt_pred)){
-            out_df[,column] <- median_wt_pred[,column]
-            
-          }
-          
-          median_wt_pred <- out_df
-        }
-        
-        median_wt_pred <- as.data.frame(median_wt_pred)
-        
-        median_wt_pred$patient_group <- patient_group[j]
-        median_wt_pred$ICD <- current_icd
-        median_wt_pred$age <- current_age
-        median_wt_pred$WT <- "median"
-        
-        toc()
-        
-      }
-    } else if(current_ward == "ga"){
-      
-      tic("Narrowing to GA")
-      hes_data <- hes_data[hes_data$cc == 0,]
-      toc()
-      ## remove na trans
-      tic("Removing NAs")
-      na_rows <- which(is.na(hes_data$ga_transitions))
-      if(length(na_rows) > 0)
-        hes_data <- hes_data[-na_rows,]
-      
-      na_ga_los <- which(is.na(hes_data$GA_LoS))
-      if(length(na_ga_los) > 0)
-        hes_data <- hes_data[-na_ga_los,]
-      toc()
-      ## set up week and year fixed effects
-      
-      tic("Getting the reg weeks")
-      hes_data$reg_week <- sapply(hes_data$admidate_MDY,week_num_func,start_week = start_date)
-      toc()
-      col_names <- NULL
-      
-  
-      tic("Setting the month fixed effects")
-      for(k in 2:length(month.name)){
-        col_name <- paste(month.name[k], "fixed_effect",sep = "_")
-        hes_data[,col_name] <- 0
-        hes_data[hes_data$admidate_MM == k,col_name] <- 1
-        col_names <- append(col_names, col_name)
-        
-      }
-      toc()
-      hes_data <- as.data.frame(hes_data)
-      
-      ## Set up the outcome variable 
-      tic("Setting up the outcome variable")
-      hes_data$outcome <- "NA"
-      
-      #hes_data$outcome <- ifelse(!is.na(hes_data$outcome[hes_data$GA_LoS >= 7]) & hes_data$GA_LoS >= 7, "GA","other")
-      hes_data[!is.na(hes_data$GA_LoS) & hes_data$GA_LoS >= 7,]$outcome <- "GA"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 2,"outcome"] <- "CC"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
-      
-      
-      
-      hes_data$stay <- hes_data$GA_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
-      hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","GA","Dead","Discharged"))
-      hes_data$outcome <- relevel(hes_data$outcome, ref = "CC")
-      
-      toc()
-      
-      ## set up the reg data 
-      
-      tic("Narrowing reg df")
-      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c(col_names, "outcome","WaitingTime","reg_week"))]
-      toc()
-      
-      ## set up the actual df 
-      
-      tic("Setting up the actual df")
-      actual_prop_dat <- reg_data_no_stay
-      actual_prop_dat$one <- 1
-      actual_prop_dat_agg <- aggregate(one ~ reg_week, data = actual_prop_dat, FUN = sum)
-      actual_prop_dat_outcome <- aggregate(one ~ reg_week + outcome, data = actual_prop_dat, FUN = sum)
-      toc()
-      
-      
-      # ml depending on WT only
-      tic("Fitting Regression")
-      ml_stay <- multinom(outcome ~ ., data = reg_data_no_stay)
-      toc()
-      
-      # we can average the probability over WT
-      
-      tic("Probability forecasting")
-      
-      # Or calculate it at the mean WT
-      means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-      forecast_week_start <- week_num_func(forecast_start,"2009-01-01")
-      forecast_week_end <- week_num_func(forecast_seq[forecast_length],"2009-01-01")
-      forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
-      
-      
-      ## make the actual data df to compare to predictions 
-      
-      actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-      colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-      actual_dat$reg_week <- forecast_week_nums
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-      
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-      
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-      
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-      
-      actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-      actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-      actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-      actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-      actual_dat$WT <- "actual"
-      
-      ## back to the mean df
-      
-      colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-      
-      means$reg_week <- forecast_week_nums
-      month_nums <- month(forecast_seq)
-      for(k in 1:length(month_nums)){
-        current_month <- month_nums[k]
-        if(current_month != 1)
-          means[k,current_month + 1] <- 1
-        
+        age_dat <- c(cc_discharges[k] / tot_ages[k], cc_ga[k] / tot_ages[k], 
+                     cc_deaths[k] / tot_ages[k], cc_ga[k] / tot_ages[k])
       }
       
-      
-      means[,1] <- mean(reg_data_no_stay$WaitingTime)
-      
-  
-      
-      mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-      if (!is.matrix(mean_wt_pred)){
-        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-        colnames(out_df) <- levels(hes_data$outcome)
-        single_val <- plyr::count(predict(ml_stay, means))
-        out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-        if(length(ml_stay$lev) > 1){
-          other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-          out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-        }
-        
-        mean_wt_pred <- out_df
-      }else if(ncol(mean_wt_pred) != 4){
-        
-        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-        colnames(out_df) <- levels(hes_data$outcome)
-        for(column in colnames(mean_wt_pred)){
-          out_df[,column] <- mean_wt_pred[,column]
-          
-        }
-        
-        mean_wt_pred <- out_df
-      }
-      
-      
-      mean_wt_pred <- as.data.frame(mean_wt_pred)
-      mean_wt_pred$patient_group <- patient_group[j]
-      mean_wt_pred$ICD <- current_icd
-      mean_wt_pred$age <- current_age
-      mean_wt_pred$WT <- "mean"
-      # Or calculate it at the median
-      medians <- means
-      medians$WaitingTime <- median(reg_data_no_stay$WaitingTime)
-      
-      
-      median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-      if (!is.matrix(median_wt_pred)){
-        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-        colnames(out_df) <- levels(hes_data$outcome)
-        single_val <- plyr::count(predict(ml_stay, means))
-        out_df[,as.character(single_val[1,1])] <- median_wt_pred
-        if(length(ml_stay$lev) > 1){
-          other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-          out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-        }
-        
-        median_wt_pred <- out_df
-      }else if(ncol(median_wt_pred) != 4){
-        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-        colnames(out_df) <- levels(hes_data$outcome)
-        for(column in colnames(median_wt_pred)){
-          out_df[,column] <- median_wt_pred[,column]
-          
-        }
-        
-        median_wt_pred <- out_df
-      }
-      
-      
-      
-      median_wt_pred <- as.data.frame(median_wt_pred)
-      
-      median_wt_pred$patient_group <- patient_group[j]
-      median_wt_pred$ICD <- current_icd
-      median_wt_pred$age <- current_age
-      median_wt_pred$WT <- "median"
-      toc()
-      
+      cc_dat <- append(cc_dat, age_dat)
     }
     
-    
-    
-    mean_wt_pred$reg_week <- forecast_week_nums
-    median_wt_pred$reg_week <- forecast_week_nums
-    
-    tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, actual_dat)
-    
-    graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:14])
-    graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
-    
-    graph_plot <- ggplot(data = graphing_df, aes(x = reg_week, y = value, group = line_group)) +
-      geom_line(aes(color = variable, linetype = WT)) + theme_bw() +
-      ggtitle(paste(patient_group[j],"month fixed and trend times"))
-    
-    print(graph_plot)
-    toc()
-    
-    whole_df <- dplyr::bind_rows(whole_df, graphing_df)
+                        
+  }else{
   
+  
+    cc_deaths <- aggregate(death ~ agegrp_v3, covid_cc, sum)$death
+    cc_discharges <- aggregate(discharges ~ agegrp_v3, covid_cc, sum)$discharges
+    cc_cc <- aggregate(remain ~ agegrp_v3, covid_cc, sum)$ward_switch
+    cc_ga <- aggregate(ward_switch ~ agegrp_v3, covid_cc, sum)$ward_switch
+    
+    age_1_dat <- c(cc_discharges[1] / tot_ages[1], cc_ga[1] / tot_ages[1], 
+                   cc_deaths[1] / tot_ages[1], cc_ga[1] / tot_ages[1])
+    age_2_dat <- c(cc_discharges[2] / tot_ages[2], cc_ga[2] / tot_ages[2], 
+                   cc_deaths[2] / tot_ages[2], cc_ga[2] / tot_ages[2])
+    age_3_dat <- c(cc_discharges[3] / tot_ages[3], cc_ga[3] / tot_ages[3], 
+                   cc_deaths[3] / tot_ages[3], cc_ga[3] / tot_ages[3])
+    cc_dat <- c(age_1_dat, age_2_dat, age_3_dat)
   }
-  dev.off()  
   
-  toc()
-  return(whole_df)
-
-}
-
-
-emergency_regression <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
-                                results_pdf = "D:/Dropbox/COVID19/Overflow/regressions_ga_output.pdf",
-                                time_trend = TRUE, month_trend = TRUE){
-  ## Input ICD hes data for one ICD one age group one patient group (cc/ga)
-  ## to be run in parrallel
-  tic("Whole process")
-  whole_df <- NULL
-  forecast_seq <- seq(as.Date(forecast_start), by = "week", length.out = 52)
-  require(stringr)
-  require(lubridate)  
-  require(reshape2)
-  require(tictoc)
   
-  pdf(file = results_pdf, paper = "A4r", width = 10, height = 7)  
   
-  for(j in 1:length(patient_group)){
-    print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
-    tic(paste("Running for patient group:",patient_group[j]))
-    
-    split_patient_group <- str_split_fixed(patient_group[j], "-",3)
-    current_icd <- as.integer(split_patient_group[1])
-    current_ward <- split_patient_group[2]
-    current_age <- as.integer(split_patient_group[3])
-    
-    hes_data <- hes_data_orig[hes_data_orig$ICD == current_icd & 
-                                hes_data_orig$agegrp_v3 == current_age,]
-    
-    if(current_ward == "cc"){
-      
-      tic("Narrowing to CC only")
-      hes_data <- hes_data[hes_data$cc == 1,]
-      toc()
-      ## remove na trans
-      tic("Removing NAs")
-      na_rows <- which(is.na(hes_data$cc_transitions))
-      if(length(na_rows) > 0)
-        hes_data <- hes_data[-na_rows,]
-      
-      na_ga_los <- which(is.na(hes_data$cc_LoS))
-      if(length(na_ga_los) > 0)
-        hes_data <- hes_data[-na_ga_los,]
-      toc()
-      
-      ## set up transitions 
-      tic("Set up outcome variable")
-      hes_data$outcome <- NA
-      
-      hes_data[hes_data$cc_LoS >= 7 ,"outcome"]<-"CC"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 2,"outcome"] <- "GA"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
-      
-      
-      
-      hes_data$stay <- hes_data$cc_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
-      hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
-      hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
-      
-      
-      toc()
-      
-    }else{
-      tic("Narrowing to GA only")
-      hes_data <- hes_data[hes_data$cc == 0,]
-      toc()
-      ## remove na trans
-      tic("Removing NAs")
-      na_rows <- which(is.na(hes_data$ga_transitions))
-      if(length(na_rows) > 0)
-        hes_data <- hes_data[-na_rows,]
-      
-      na_ga_los <- which(is.na(hes_data$GA_LoS))
-      if(length(na_ga_los) > 0)
-        hes_data <- hes_data[-na_ga_los,]
-      toc()
-      
-      ## set up transitions 
-      tic("Set up outcome variable")
-      hes_data$outcome <- NA
-      
-      hes_data[hes_data$GA_LoS >= 7 ,"outcome"]<-"GA"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 2,"outcome"] <- "CC"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
-      
-      
-      
-      hes_data$stay <- hes_data$GA_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
-      hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
-      hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
-      
-      
-      toc()
-    }
-      ## set up week and year fixed effects
-      
-      forecast_week_start <- week_num_func(forecast_start,"2009-01-01")
-      forecast_week_end <- week_num_func(forecast_seq[forecast_length],"2009-01-01")
-      forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
-      
-      
-      
-      
-        tic("Getting the reg week data")
-        hes_data$reg_week <- sapply(hes_data$admidate_MDY,week_num_func,start_week = start_date)
-        toc()
-        
-      
-      if(month_trend == TRUE){
-        col_names <- NULL
-        
-        
-        
-        for(k in 2:length(month.name)){
-          col_name <- paste(month.name[k], "fixed_effect",sep = "_")
-          hes_data[,col_name] <- 0
-          hes_data[hes_data$admidate_MM == k,col_name] <- 1
-          col_names <- append(col_names, col_name)
-          
-        }
-        
-      }
-      ## Set up the outcome variable 
-      ## set up the reg data 
-      tic("Reg set up")
-      
-      if(time_trend == TRUE & month_trend == TRUE){
-        reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c(col_names, "outcome","reg_week"))]
-      }else if(time_trend == TRUE & month_trend == FALSE){
-        reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome","reg_week"))]
-      }else if(time_trend == FALSE & month_trend == TRUE){
-        reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c(col_names, "outcome"))]
-      }else{
-        reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome"))]
-      }
-      
-      
-      
-      
-      
-      actual_prop_dat <- hes_data[,which(colnames(hes_data) %in% c("outcome","reg_week"))]
-      actual_prop_dat$one <- 1
-      actual_prop_dat_agg <- aggregate(one ~ reg_week, data = actual_prop_dat, FUN = sum)
-      actual_prop_dat_outcome <- aggregate(one ~ reg_week + outcome, data = actual_prop_dat, FUN = sum)
-      
-      
-      toc()
-      
-      
-      
-      outcomes_in_dat <- plyr::count(reg_data_no_stay$outcome)
-      ## Checking if enough outcomes for model else will return one for probs
-      
-      if(nrow(outcomes_in_dat) < 2){
-        out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-        colnames(out_df) <- levels(hes_data$outcome)
-        out_df[,outcomes_in_dat[1,1]] <- 1
-        mean_wt_pred <- as.data.frame(out_df)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        median_wt_pred <- mean_wt_pred
-        median_wt_pred$WT <- "median"
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        
-        
-      }else{
-        
-        
-        
-        # ml depending on WT only
-        
-        if(time_trend | month_trend){
-        
-          tic("Regreesion model fitting")
-          ml_stay <- multinom(outcome ~ ., data = reg_data_no_stay)
-          toc()
-        }else{
-          mean_wt_pred <- data.frame(matrix(data = 0, nrow = forecast_length, ncol = 4))
-          colnames(mean_wt_pred) <- levels(hes_data$outcome)
-          denominator <- sum(actual_prop_dat_agg$one)
-          GA_num <- sum(actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA", "one"])
-          cc_num <- sum(actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC", "one"])
-          dead_num <- sum(actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead", "one"])
-          dis_num <- sum(actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged", "one"])
-          
-          mean_wt_pred$GA <- GA_num / denominator
-          mean_wt_pred$CC <- cc_num / denominator 
-          mean_wt_pred$Dead <- dead_num / denominator
-          mean_wt_pred$Discharged <- dis_num / denominator
-          mean_wt_pred$patient_group <- patient_group[j]
-          mean_wt_pred$ICD <- current_icd
-          mean_wt_pred$age <- current_age
-          mean_wt_pred$WT <- "mean"
-          
-          median_wt_pred <- mean_wt_pred
-          median_wt_pred$WT <- "median"
-          
-          actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-          colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-          actual_dat$reg_week <- forecast_week_nums
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-          
-          actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-          actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-          actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-          actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-          actual_dat$WT <- "actual"
-          
-          
-          
-        }
-        if(time_trend & month_trend){
-        # we can average the probability over WT
-        
-        
-        
-        # Or calculate it at the mean WT
-        tic("Probability creation")
-        means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-        
-        ## make the actual data df to compare to predictions 
-        
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-        
-        means$reg_week <- forecast_week_nums
-        month_nums <- month(forecast_seq)
-        for(k in 1:length(month_nums)){
-          current_month <- month_nums[k]
-          if(current_month != 1)
-            means[k,current_month + 1] <- 1
-          
-        }
-        
-        
-        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-        if (!is.matrix(mean_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          mean_wt_pred <- out_df
-        }else if(ncol(mean_wt_pred) != 4){
-          
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(mean_wt_pred)){
-            out_df[,column] <- mean_wt_pred[,column]
-            
-          }
-          
-          mean_wt_pred <- out_df
-        }
-        
-        mean_wt_pred <- as.data.frame(mean_wt_pred)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        # Or calculate it at the median
-        medians <- means
-        
-        median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-        if (!is.matrix(median_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- median_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          median_wt_pred <- out_df
-        }else if(ncol(median_wt_pred) != 4){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(median_wt_pred)){
-            out_df[,column] <- median_wt_pred[,column]
-            
-          }
-          
-          median_wt_pred <- out_df
-        }
-        
-        median_wt_pred <- as.data.frame(median_wt_pred)
-        
-        median_wt_pred$patient_group <- patient_group[j]
-        median_wt_pred$ICD <- current_icd
-        median_wt_pred$age <- current_age
-        median_wt_pred$WT <- "median"
-        
-        toc()
-        }else if(time_trend & month_trend == FALSE){
-          tic("Probability creation")
-          means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-          
-          ## make the actual data df to compare to predictions 
-          
-          actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-          colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-          actual_dat$reg_week <- forecast_week_nums
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-          
-          actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-          actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-          actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-          actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-          actual_dat$WT <- "actual"
-          colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-          
-          means$reg_week <- forecast_week_nums
-          
-          mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-          if (!is.matrix(mean_wt_pred)){
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            single_val <- plyr::count(predict(ml_stay, means))
-            out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-            if(length(ml_stay$lev) > 1){
-              other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-              out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-            }
-            
-            mean_wt_pred <- out_df
-          }else if(ncol(mean_wt_pred) != 4){
-            
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            for(column in colnames(mean_wt_pred)){
-              out_df[,column] <- mean_wt_pred[,column]
-              
-            }
-            
-            mean_wt_pred <- out_df
-          }
-          
-          mean_wt_pred <- as.data.frame(mean_wt_pred)
-          mean_wt_pred$patient_group <- patient_group[j]
-          mean_wt_pred$ICD <- current_icd
-          mean_wt_pred$age <- current_age
-          mean_wt_pred$WT <- "mean"
-          # Or calculate it at the median
-          medians <- means
-          
-          median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-          if (!is.matrix(median_wt_pred)){
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            single_val <- plyr::count(predict(ml_stay, means))
-            out_df[,as.character(single_val[1,1])] <- median_wt_pred
-            if(length(ml_stay$lev) > 1){
-              other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-              out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-            }
-            
-            median_wt_pred <- out_df
-          }else if(ncol(median_wt_pred) != 4){
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            for(column in colnames(median_wt_pred)){
-              out_df[,column] <- median_wt_pred[,column]
-              
-            }
-            
-            median_wt_pred <- out_df
-          }
-          
-          median_wt_pred <- as.data.frame(median_wt_pred)
-          
-          median_wt_pred$patient_group <- patient_group[j]
-          median_wt_pred$ICD <- current_icd
-          median_wt_pred$age <- current_age
-          median_wt_pred$WT <- "median"
-          
-          toc()
-          
-          
-          
-          
-        }else if(time_trend == FALSE & month_trend){
-          tic("Probability creation")
-          means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-          
-          ## make the actual data df to compare to predictions 
-          
-          actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-          colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-          actual_dat$reg_week <- forecast_week_nums
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-          
-          actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                         by = c("reg_week" = "reg_week"))
-          colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-          
-          actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-          actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-          actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-          actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-          actual_dat$WT <- "actual"
-          colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-          
-          
-          month_nums <- month(forecast_seq)
-          for(k in 1:length(month_nums)){
-            current_month <- month_nums[k]
-            if(current_month != 1)
-              means[k,current_month + 1] <- 1
-            
-          }
-          
-          
-          mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-          if (!is.matrix(mean_wt_pred)){
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            single_val <- plyr::count(predict(ml_stay, means))
-            out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-            if(length(ml_stay$lev) > 1){
-              other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-              out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-            }
-            
-            mean_wt_pred <- out_df
-          }else if(ncol(mean_wt_pred) != 4){
-            
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            for(column in colnames(mean_wt_pred)){
-              out_df[,column] <- mean_wt_pred[,column]
-              
-            }
-            
-            mean_wt_pred <- out_df
-          }
-          
-          mean_wt_pred <- as.data.frame(mean_wt_pred)
-          mean_wt_pred$patient_group <- patient_group[j]
-          mean_wt_pred$ICD <- current_icd
-          mean_wt_pred$age <- current_age
-          mean_wt_pred$WT <- "mean"
-          # Or calculate it at the median
-          medians <- means
-          
-          median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-          if (!is.matrix(median_wt_pred)){
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            single_val <- plyr::count(predict(ml_stay, means))
-            out_df[,as.character(single_val[1,1])] <- median_wt_pred
-            if(length(ml_stay$lev) > 1){
-              other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-              out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-            }
-            
-            median_wt_pred <- out_df
-          }else if(ncol(median_wt_pred) != 4){
-            out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-            colnames(out_df) <- levels(hes_data$outcome)
-            for(column in colnames(median_wt_pred)){
-              out_df[,column] <- median_wt_pred[,column]
-              
-            }
-            
-            median_wt_pred <- out_df
-          }
-          
-          median_wt_pred <- as.data.frame(median_wt_pred)
-          
-          median_wt_pred$patient_group <- patient_group[j]
-          median_wt_pred$ICD <- current_icd
-          median_wt_pred$age <- current_age
-          median_wt_pred$WT <- "median"
-          
-          toc()
-          
-          
-        }
-        
-      }
-    
-    mean_wt_pred$reg_week <- forecast_week_nums
-    median_wt_pred$reg_week <- forecast_week_nums
-    
-    tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, actual_dat)
-    
-    graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:14])
-    graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
-    
-    graph_plot <- ggplot(data = graphing_df, aes(x = reg_week, y = value, group = line_group)) +
-      geom_line(aes(color = variable, linetype = WT)) + theme_bw() +
-      ggtitle(paste(patient_group[j],"month fixed and trend times"))
-    
-    print(graph_plot)
-    toc()
-    
-    whole_df <- dplyr::bind_rows(whole_df, graphing_df)
-    
-  }
-  dev.off()  
+  out_df[c(5:8,13:16,21:24),"coeff"] <- cc_dat
   
-  toc()
-  return(whole_df)
+  
+  return(out_df)
+  
   
 }
 
 
 
 
-elective_regression <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
-                                 results_pdf = "D:/Dropbox/COVID19/Overflow/regressions_ga_output.pdf",
-                                 time_trend = TRUE, month_trend = TRUE){
-  ## Input ICD hes data for one ICD one age group one patient group (cc/ga)
-  ## to be run in parrallel
-  tic("Whole process")
-  whole_df <- NULL
-  forecast_seq <- seq(as.Date(forecast_start), by = "week", length.out = 52)
-  require(stringr)
-  require(lubridate)  
-  require(reshape2)
-  require(tictoc)
-  
-  pdf(file = results_pdf, paper = "A4r", width = 10, height = 7)  
 
-  for(j in 1:length(patient_group)){
-    print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
-    tic(paste("Running for patient group:",patient_group[j]))
-    
-    split_patient_group <- str_split_fixed(patient_group[j], "-",3)
-    current_icd <- as.integer(split_patient_group[1])
-    current_ward <- split_patient_group[2]
-    current_age <- as.integer(split_patient_group[3])
-    
-    hes_data <- hes_data_orig[hes_data_orig$ICD == current_icd & 
-                                hes_data_orig$agegrp_v3 == current_age,]
-    
-    if(current_ward == "cc"){
-      
-      tic("Narrowing to CC only")
-      hes_data <- hes_data[hes_data$cc == 1,]
-      toc()
-      ## remove na trans
-      tic("Removing NAs")
-      na_rows <- which(is.na(hes_data$cc_transitions))
-      if(length(na_rows) > 0)
-        hes_data <- hes_data[-na_rows,]
-      
-      na_cc_los <- which(is.na(hes_data$cc_LoS))
-      if(length(na_cc_los) > 0)
-        hes_data <- hes_data[-na_cc_los,]
-      
-      na_cc_WT <- which(is.na(hes_data$WaitingTime))
-      if(length(na_cc_WT) > 0)
-        hes_data <- hes_data[-na_cc_WT,]
-      
-      
-      toc()
-      
-      ## set up transitions 
-      tic("Set up outcome variable")
-      hes_data$outcome <- NA
-      
-      hes_data[hes_data$cc_LoS >= 7 ,"outcome"]<-"CC"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 2,"outcome"] <- "GA"
-      hes_data[hes_data$cc_LoS < 7 & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
-      
-      
-      
-      hes_data$stay <- hes_data$cc_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
-      hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
-      hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
-      
-      
-      toc()
-      
-    }else{
-      ## remove na trans
-      tic("Removing NAs")
-      na_rows <- which(is.na(hes_data$ga_transitions))
-      if(length(na_rows) > 0)
-        hes_data <- hes_data[-na_rows,]
-      
-      na_ga_los <- which(is.na(hes_data$GA_LoS))
-      if(length(na_ga_los) > 0)
-        hes_data <- hes_data[-na_ga_los,]
-      
-      na_ga_WT <- which(is.na(hes_data$WaitingTime))
-      if(length(na_ga_WT) > 0)
-        hes_data <- hes_data[-na_ga_WT,]
-      
-      
-      toc()
-      
-      ## set up transitions 
-      tic("Set up outcome variable")
-      hes_data$outcome <- NA
-      
-      hes_data[hes_data$GA_LoS >= 7 ,"outcome"]<-"GA"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 2,"outcome"] <- "CC"
-      hes_data[hes_data$GA_LoS < 7 & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
-      
-      
-      
-      hes_data$stay <- hes_data$GA_LoS
-      hes_data[hes_data$stay > 7,"stay"]<-7
-      
-      
-      
-      hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
-      hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
-      
-      
-      toc()
-    }
-    ## set up week and year fixed effects
-    
-    forecast_week_start <- week_num_func(forecast_start,"2009-01-01")
-    forecast_week_end <- week_num_func(forecast_seq[forecast_length],"2009-01-01")
-    forecast_week_nums <- seq(forecast_week_start, forecast_week_end)
-    
-    
-    
-    
-    tic("Getting the reg week data")
-    hes_data$reg_week <- sapply(hes_data$admidate_MDY,week_num_func,start_week = start_date)
-    toc()
-    
-    
-    if(month_trend == TRUE){
-      col_names <- NULL
-      
-      
-      
-      for(k in 2:length(month.name)){
-        col_name <- paste(month.name[k], "fixed_effect",sep = "_")
-        hes_data[,col_name] <- 0
-        hes_data[hes_data$admidate_MM == k,col_name] <- 1
-        col_names <- append(col_names, col_name)
-        
-      }
-      
-    }
-    ## Set up the outcome variable 
-    ## set up the reg data 
-    tic("Reg set up")
-    
-    if(time_trend == TRUE & month_trend == TRUE){
-      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c(col_names, "outcome","reg_week","WaitingTime"))]
-    }else if(time_trend == TRUE & month_trend == FALSE){
-      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome","reg_week","WaitingTime"))]
-    }else if(time_trend == FALSE & month_trend == TRUE){
-      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c(col_names, "outcome","WaitingTime"))]
-    }else{
-      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome","WaitingTime"))]
-    }
-    
-    
-    
-    
-    
-    actual_prop_dat <- hes_data[,which(colnames(hes_data) %in% c("outcome","reg_week"))]
-    actual_prop_dat$one <- 1
-    actual_prop_dat_agg <- aggregate(one ~ reg_week, data = actual_prop_dat, FUN = sum)
-    actual_prop_dat_outcome <- aggregate(one ~ reg_week + outcome, data = actual_prop_dat, FUN = sum)
-    
-    
-    toc()
-    
-    
-    
-    outcomes_in_dat <- plyr::count(reg_data_no_stay$outcome)
-    ## Checking if enough outcomes for model else will return one for probs
-    
-    if(nrow(outcomes_in_dat) < 2){
-      out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-      colnames(out_df) <- levels(hes_data$outcome)
-      out_df[,outcomes_in_dat[1,1]] <- 1
-      mean_wt_pred <- as.data.frame(out_df)
-      mean_wt_pred$patient_group <- patient_group[j]
-      mean_wt_pred$ICD <- current_icd
-      mean_wt_pred$age <- current_age
-      mean_wt_pred$WT <- "mean"
-      median_wt_pred <- mean_wt_pred
-      median_wt_pred$WT <- "median"
-      actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-      colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-      actual_dat$reg_week <- forecast_week_nums
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-      
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-      
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-      
-      actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                     by = c("reg_week" = "reg_week"))
-      colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-      
-      actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-      actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-      actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-      actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-      actual_dat$WT <- "actual"
-      
-      
-    }else{
-      
-      
-      
-      # ml depending on WT only
-      
-      tic("Regreesion model fitting")
-      ml_stay <- multinom(outcome ~ ., data = reg_data_no_stay)
-      
-
-      wt_0_dat <- data.frame(matrix(0, ncol = ncol(reg_data_no_stay) - 1, nrow = 1))
-      colnames(wt_0_dat) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-      wt_1_dat <- wt_0_dat
-      wt_1_dat$WaitingTime <- 1
-      
-      wt_0_pred <- predict(ml_stay, newdata = wt_0_dat, "probs")
-      wt_1_pred <- predict(ml_stay, newdata = wt_1_dat, "probs")
-      
-      wt_diff <- wt_1_pred - wt_0_pred
-      
-      if(length(wt_diff) != 4){
-        
-        missing_factors <- which(!(levels(reg_data_no_stay$outcome) %in% names(wt_diff)))
-        old_names <- names(wt_diff)
-        wt_diff <- append(wt_diff,rep(0, length(missing_factors)))
-        names(wt_diff) <- c(old_names, levels(reg_data_no_stay$outcome)[missing_factors])
-        
-      }
-      current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
-      colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
-      current_coef_df$transition <- names(wt_diff)
-      current_coef_df$coef <- wt_diff
-      current_coef_df$patient_group <- patient_group[j]
-      current_coef_df$ICD <- current_icd
-      current_coef_df$age <- current_age
-      
-      toc()
-      
-      if(time_trend & month_trend){
-        # we can average the probability over WT
-        
-        
-        
-        # Or calculate it at the mean WT
-        tic("Probability creation")
-        means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-        
-        ## make the actual data df to compare to predictions 
-        
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-        
-        means$WaitingTime <- mean(reg_data_no_stay$WaitingTime, na.rm = TRUE)
-        means$reg_week <- forecast_week_nums
-        month_nums <- month(forecast_seq)
-        for(k in 1:length(month_nums)){
-          current_month <- month_nums[k]
-          if(current_month != 1)
-            means[k,current_month + 1] <- 1
-          
-        }
-        
-        
-        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-        if (!is.matrix(mean_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          mean_wt_pred <- out_df
-        }else if(ncol(mean_wt_pred) != 4){
-          
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(mean_wt_pred)){
-            out_df[,column] <- mean_wt_pred[,column]
-            
-          }
-          
-          mean_wt_pred <- out_df
-        }
-        
-        mean_wt_pred <- as.data.frame(mean_wt_pred)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        # Or calculate it at the median
-        medians <- means
-        medians$WaitingTime <- median(reg_data_no_stay$WaitingTime)
-        
-        median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-        if (!is.matrix(median_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- median_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          median_wt_pred <- out_df
-        }else if(ncol(median_wt_pred) != 4){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(median_wt_pred)){
-            out_df[,column] <- median_wt_pred[,column]
-            
-          }
-          
-          median_wt_pred <- out_df
-        }
-        
-        median_wt_pred <- as.data.frame(median_wt_pred)
-        
-        median_wt_pred$patient_group <- patient_group[j]
-        median_wt_pred$ICD <- current_icd
-        median_wt_pred$age <- current_age
-        median_wt_pred$WT <- "median"
-        
-        toc()
-      }else if(time_trend & month_trend == FALSE){
-        tic("Probability creation")
-        means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-        
-        ## make the actual data df to compare to predictions 
-        
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-        
-        means$reg_week <- forecast_week_nums
-        
-        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-        if (!is.matrix(mean_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          mean_wt_pred <- out_df
-        }else if(ncol(mean_wt_pred) != 4){
-          
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(mean_wt_pred)){
-            out_df[,column] <- mean_wt_pred[,column]
-            
-          }
-          
-          mean_wt_pred <- out_df
-        }
-        
-        mean_wt_pred <- as.data.frame(mean_wt_pred)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        # Or calculate it at the median
-        medians <- means
-        
-        median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-        if (!is.matrix(median_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- median_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          median_wt_pred <- out_df
-        }else if(ncol(median_wt_pred) != 4){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(median_wt_pred)){
-            out_df[,column] <- median_wt_pred[,column]
-            
-          }
-          
-          median_wt_pred <- out_df
-        }
-        
-        median_wt_pred <- as.data.frame(median_wt_pred)
-        
-        median_wt_pred$patient_group <- patient_group[j]
-        median_wt_pred$ICD <- current_icd
-        median_wt_pred$age <- current_age
-        median_wt_pred$WT <- "median"
-        
-        toc()
-        
-        
-        
-        
-      }else if(time_trend == FALSE & month_trend){
-        tic("Probability creation")
-        means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-        
-        ## make the actual data df to compare to predictions 
-        
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-        
-        
-        month_nums <- month(forecast_seq)
-        for(k in 1:length(month_nums)){
-          current_month <- month_nums[k]
-          if(current_month != 1)
-            means[k,current_month + 1] <- 1
-          
-        }
-        
-        
-        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-        if (!is.matrix(mean_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          mean_wt_pred <- out_df
-        }else if(ncol(mean_wt_pred) != 4){
-          
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(mean_wt_pred)){
-            out_df[,column] <- mean_wt_pred[,column]
-            
-          }
-          
-          mean_wt_pred <- out_df
-        }
-        
-        mean_wt_pred <- as.data.frame(mean_wt_pred)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        # Or calculate it at the median
-        medians <- means
-        
-        median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-        if (!is.matrix(median_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- median_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          median_wt_pred <- out_df
-        }else if(ncol(median_wt_pred) != 4){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(median_wt_pred)){
-            out_df[,column] <- median_wt_pred[,column]
-            
-          }
-          
-          median_wt_pred <- out_df
-        }
-        
-        median_wt_pred <- as.data.frame(median_wt_pred)
-        
-        median_wt_pred$patient_group <- patient_group[j]
-        median_wt_pred$ICD <- current_icd
-        median_wt_pred$age <- current_age
-        median_wt_pred$WT <- "median"
-        
-        toc()
-        
-        
-      }else if( month_trend == FALSE & time_trend == FALSE){
-        tic("Probability creation")
-        means <- data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = forecast_length))
-        
-        ## make the actual data df to compare to predictions 
-        
-        actual_dat <- data.frame(matrix(data = NA, nrow = forecast_length, ncol = 5))
-        colnames(actual_dat) <- c("reg_week","GA","Dead","CC","Discharged")
-        actual_dat$reg_week <- forecast_week_nums
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_agg, by = c("reg_week"="reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "tot"
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "GA",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "GA_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "CC",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "CC_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Dead",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Dead_tot"
-        
-        actual_dat <- dplyr::left_join(actual_dat, actual_prop_dat_outcome[actual_prop_dat_outcome$outcome == "Discharged",c("reg_week","one")],
-                                       by = c("reg_week" = "reg_week"))
-        colnames(actual_dat)[ncol(actual_dat)] <- "Discharged_tot"
-        
-        actual_dat$GA <- actual_dat$GA_tot / actual_dat$tot 
-        actual_dat$CC <- actual_dat$CC_tot / actual_dat$tot 
-        actual_dat$Dead <- actual_dat$Dead_tot / actual_dat$tot 
-        actual_dat$Discharged <- actual_dat$Discharged_tot / actual_dat$tot 
-        actual_dat$WT <- "actual"
-        colnames(means) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
-        
-        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
-        if (!is.matrix(mean_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- mean_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          mean_wt_pred <- out_df
-        }else if(ncol(mean_wt_pred) != 4){
-          
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(mean_wt_pred)){
-            out_df[,column] <- mean_wt_pred[,column]
-            
-          }
-          
-          mean_wt_pred <- out_df
-        }
-        
-        mean_wt_pred <- as.data.frame(mean_wt_pred)
-        mean_wt_pred$patient_group <- patient_group[j]
-        mean_wt_pred$ICD <- current_icd
-        mean_wt_pred$age <- current_age
-        mean_wt_pred$WT <- "mean"
-        # Or calculate it at the median
-        medians <- means
-        
-        median_wt_pred <- predict(ml_stay, newdata = medians, "probs")
-        if (!is.matrix(median_wt_pred)){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          single_val <- plyr::count(predict(ml_stay, means))
-          out_df[,as.character(single_val[1,1])] <- median_wt_pred
-          if(length(ml_stay$lev) > 1){
-            other_level <- ml_stay$lev[which(ml_stay$lev != single_val[1,1])]
-            out_df[,other_level] <- 1 - out_df[,as.character(single_val[1,1])]
-          }
-          
-          median_wt_pred <- out_df
-        }else if(ncol(median_wt_pred) != 4){
-          out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
-          colnames(out_df) <- levels(hes_data$outcome)
-          for(column in colnames(median_wt_pred)){
-            out_df[,column] <- median_wt_pred[,column]
-            
-          }
-          
-          median_wt_pred <- out_df
-        }
-        
-        median_wt_pred <- as.data.frame(median_wt_pred)
-        
-        median_wt_pred$patient_group <- patient_group[j]
-        median_wt_pred$ICD <- current_icd
-        median_wt_pred$age <- current_age
-        median_wt_pred$WT <- "median"
-        
-        toc()
-        
-        
-        
-        
-        
-      }
-      
-    }
-    
-    mean_wt_pred$reg_week <- forecast_week_nums
-    median_wt_pred$reg_week <- forecast_week_nums
-    
-    tot_df <- dplyr::bind_rows(mean_wt_pred, median_wt_pred, actual_dat)
-    
-    graphing_df <- melt(tot_df, id.vars = colnames(tot_df)[5:14])
-    graphing_df$line_group <- paste(graphing_df$variable, graphing_df$WT, sep = "-")
-    
-    graph_plot <- ggplot(data = graphing_df, aes(x = reg_week, y = value, group = line_group)) +
-      geom_line(aes(color = variable, linetype = WT)) + theme_bw() +
-      ggtitle(paste(patient_group[j],"month fixed and trend times"))
-    
-    print(graph_plot)
-    toc()
-    
-    whole_df <- dplyr::bind_rows(whole_df, graphing_df)
-    
-    
-  }
-  dev.off()  
-  
-  toc()
-  return(whole_df)
-  
-}
 
 
 ###############################################################################
@@ -3629,7 +1986,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
 
 regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, forecast_start = "2012-03-05",
                                       start_date = "2009-01-01", time_trend = TRUE, month_trend = TRUE, wt_variable = "linear",
-                                      week_num = 1){
+                                      week_num = 1, failure_function_run = TRUE){
 
   ## Takes in data and the patient group as either "elective" or "emergency"
   print("Listing the icds now") 
@@ -3637,7 +1994,42 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
   
   whole_graph_df <- NULL
   coefdf_tot <- NULL
+  failure_df <- NULL
   
+  if(failure_function_run){
+    ## use the try catch function to run through all the icds for the failure function to
+    ## run on 
+    cohort_12 <- hes_data[hes_data$cohort != 3,]
+    
+      
+      
+      
+      current_icd <- elective_groupings[k]
+    cohort12_icd <- cohort12[cohort12$elective_icd == current_icd,]
+    cohort1_icd <- cohort1[cohort1$ICD == current_icd,]
+    
+    failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
+    failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
+    
+    ## try catch for survival analysis 
+    ## failure function 
+    
+    
+    cohort12_failure_func <- failure_func_try(cohort23 =  cohort12_icd,
+                                              csv_survival_name = failure_csv,
+                                              pdf_to_export = failure_pdf, current_ICD = current_icd)   
+    
+    if(length(cohort12_failure_func) != 0){
+      failure_res <- rbind.data.frame(failure_res, cohort12_failure_func[[2]])
+    }
+    
+    
+    
+  }
+  
+  
+  
+    
   if(patient_group == "elective"){
     tic("Narrowing down the data")
     
@@ -3816,9 +2208,346 @@ multi_graph_plotter <- function(reg_res, out_file, trend_types = "month and time
 }
 
 
+memory_less_observations <- function(hes_data){
+  start_time <- Sys.time()
+  ## Need to output the following:
+  ## - average LoS for G&A and CC for all patient groups
+  ## - Overall admissions in the data for CC and G&A all patient groups
+  ## - Overall deaths in the data for CC and G&A for all patient groups 
+  ## - Overall discharges in the data for CC and G&A for all patient groups 
+  
+  ## Narrow HES 
+  print("Narrowing HES data")
+  tic()
+  hes_data <- hes_data[,c("GA_LoS","cc_LoS","ga_transitions","cc_transitions","cc",
+                          "ICD","cohort","agegrp_v3")]
+  
+  hes_data$admi <- ifelse(hes_data$cohort == 1,1,3)
+  hes_data$ga_2 <- hes_data$ga_transitions
+  hes_data$cc_2 <- hes_data$cc_transitions
+  hes_data$ga_2[which(is.na(hes_data$ga_2))] <- 0
+  hes_data$cc_2[which(is.na(hes_data$cc_2))] <- 0
+  
+  hes_data$death <- ifelse(hes_data$ga_2 == 3 | hes_data$cc_2 == 3, 1,0)
+  hes_data$discharges <- ifelse(hes_data$ga_2 == 1 | hes_data$cc_2 == 1, 1, 0)
+  hes_data$one <- 1
+  toc()
+  ## Los Averages first 
+  print("Setting up separate groupings")
+  tic()
+  emerg_rows <- hes_data[hes_data$admi == 3,]
+  elec_rows <- hes_data[hes_data$admi == 1,]
+  
+  emerg_cc <- emerg_rows[emerg_rows$cc == 1,]
+  elec_cc <- elec_rows[elec_rows$cc == 1,]
+  emerg_cc <- emerg_cc[-which(is.na(emerg_cc$cc_transitions)),]
+  elec_cc <- elec_cc[-which(is.na(elec_cc$cc_transitions)),]
+  
+  emerg_ga <- emerg_rows[-which(is.na(emerg_rows$ga_transitions)),]
+  elec_ga <- elec_rows[-which(is.na(elec_rows$ga_transitions)),]
+  
+  emerg_icds <- unique(emerg_rows$ICD)
+  elec_icds <- unique(elec_rows$ICD)
+  
+  emerg_icds_seq <- rep(emerg_icds, each = 3*2)
+  elec_icds_seq <- rep(elec_icds, each = 3*2)
+  ages <- rep(c(1,2,3), 2 *(length(emerg_icds) + length(elec_icds)))
+  ward <- rep(rep(c("GA","CC"), each = 3), (length(emerg_icds) + length(elec_icds)))
+  admis <- c(rep("emergency",length(emerg_icds) * 3 * 2), rep("elective",length(elec_icds) * 2 * 3))
+  tot_icds <- c(emerg_icds_seq, elec_icds_seq)
+  toc()
+  print("LoS calculations")
+  tic()
+  LoS_df <- data.frame(matrix(data = 0, ncol = 4, nrow = length(tot_icds)))
+  colnames(LoS_df) <- c("ICD","agegrp_v3","admi","ward")
+  LoS_df[,1] <- tot_icds
+  LoS_df[,2] <- ages
+  LoS_df[,3] <- admis
+  LoS_df[,4] <- ward
+  
+  emerg_ga_Los <- aggregate(GA_LoS ~ ICD + agegrp_v3, emerg_ga, FUN = mean, na.rm = TRUE)
+  colnames(emerg_ga_Los)[3] <- "LoS"
+  emerg_ga_Los$admi <- "emergency"
+  emerg_ga_Los$ward <- "GA"
+  
+  elec_ga_Los <- aggregate(GA_LoS ~ ICD + agegrp_v3, elec_ga, FUN = mean, na.rm = TRUE)
+  colnames(elec_ga_Los)[3] <- "LoS"
+  elec_ga_Los$admi <-"elective"
+  elec_ga_Los$ward <- "GA"
+  
+  emerg_cc_Los <- aggregate(cc_LoS ~ ICD + agegrp_v3, emerg_cc, FUN = mean, na.rm = TRUE)
+  colnames(emerg_cc_Los)[3] <- "LoS"
+  emerg_cc_Los$admi <- "emergency"
+  emerg_cc_Los$ward <- "CC"
+  
+  elec_cc_Los <- aggregate(cc_LoS ~ ICD + agegrp_v3, elec_cc, FUN = mean, na.rm = TRUE)
+  colnames(elec_cc_Los)[3] <- "LoS"
+  elec_cc_Los$admi <- "elective"
+  elec_cc_Los$ward <- "CC"
+  
+  tot_df <- dplyr::bind_rows(emerg_ga_Los, emerg_cc_Los, elec_ga_Los, elec_cc_Los)
+  LoS_df <- dplyr::left_join(LoS_df, tot_df)
+  toc()
+  ## admissions ##
+  print("Admission calculations")
+  tic()
+  admi_df <- data.frame(matrix(data = 0, ncol = 4, nrow = length(tot_icds)))
+  colnames(admi_df) <- c("ICD","agegrp_v3","admi","ward")
+  admi_df[,1] <- tot_icds
+  admi_df[,2] <- ages
+  admi_df[,3] <- admis
+  admi_df[,4] <- ward
+  
+  emerg_ga_admi <- aggregate(one ~ ICD + agegrp_v3, emerg_ga, FUN = sum)
+  colnames(emerg_ga_admi)[3] <- "Admissions"
+  emerg_ga_admi$admi <- "emergency"
+  emerg_ga_admi$ward <- "GA"
+  
+  elec_ga_admi <- aggregate(one ~ ICD + agegrp_v3, elec_ga, FUN = sum)
+  colnames(elec_ga_admi)[3] <- "Admissions"
+  elec_ga_admi$admi <-"elective"
+  elec_ga_admi$ward <- "GA"
+  
+  emerg_cc_admi <- aggregate(one ~ ICD + agegrp_v3, emerg_cc,FUN = sum)
+  colnames(emerg_cc_admi)[3] <- "Admissions"
+  emerg_cc_admi$admi <- "emergency"
+  emerg_cc_admi$ward <- "CC"
+  
+  elec_cc_admi <- aggregate(one ~ ICD + agegrp_v3, elec_cc, FUN = sum)
+  colnames(elec_cc_admi)[3] <- "Admissions"
+  elec_cc_admi$admi <- "elective"
+  elec_cc_admi$ward <- "CC"
+  
+  tot_df <- dplyr::bind_rows(emerg_ga_admi, emerg_cc_admi, elec_ga_admi, elec_cc_admi)
+  admi_df <- dplyr::left_join(admi_df, tot_df)
+  toc()
+  ## deaths ##
+  
+  print("Deaths calculations")
+  tic()
+  deaths_df <- data.frame(matrix(data = 0, ncol = 4, nrow = length(tot_icds)))
+  colnames(deaths_df) <- c("ICD","agegrp_v3","admi","ward")
+  deaths_df[,1] <- tot_icds
+  deaths_df[,2] <- ages
+  deaths_df[,3] <- admis
+  deaths_df[,4] <- ward
+  
+  emerg_ga_def <- aggregate(death ~ ICD + agegrp_v3, emerg_ga, FUN = sum, na.rm = TRUE)
+  colnames(emerg_ga_def)[3] <- "death"
+  emerg_ga_def$admi <- "emergency"
+  emerg_ga_def$ward <- "GA"
+  
+  elec_ga_def <- aggregate(death ~ ICD + agegrp_v3, elec_ga, FUN = sum, na.rm = TRUE)
+  colnames(elec_ga_def)[3] <- "death"
+  elec_ga_def$admi <-"elective"
+  elec_ga_def$ward <- "GA"
+  
+  emerg_cc_def <- aggregate(death ~ ICD + agegrp_v3, emerg_cc,FUN = sum, na.rm = TRUE)
+  colnames(emerg_cc_def)[3] <- "death"
+  emerg_cc_def$admi <- "emergency"
+  emerg_cc_def$ward <- "CC"
+  
+  elec_cc_def <- aggregate(death ~ ICD + agegrp_v3, elec_cc, FUN = sum, na.rm = TRUE)
+  colnames(elec_cc_admi)[3] <- "death"
+  elec_cc_def$admi <- "elective"
+  elec_cc_def$ward <- "CC"
+  
+  tot_df <- dplyr::bind_rows(emerg_ga_def, emerg_cc_def, elec_ga_def, elec_cc_def)
+  deaths_df <- dplyr::left_join(deaths_df, tot_df)
+  toc()
+  ## Discharges
+  print("Discharges now")
+  tic()
+  dis_df <- data.frame(matrix(data = 0, ncol = 4, nrow = length(tot_icds)))
+  colnames(dis_df) <- c("ICD","agegrp_v3","admi","ward")
+  dis_df[,1] <- tot_icds
+  dis_df[,2] <- ages
+  dis_df[,3] <- admis
+  dis_df[,4] <- ward
+  
+  emerg_ga_dis <- aggregate(discharges ~ ICD + agegrp_v3, emerg_ga, FUN = sum, na.rm = TRUE)
+  colnames(emerg_ga_dis)[3] <- "discharges"
+  emerg_ga_dis$admi <- "emergency"
+  emerg_ga_dis$ward <- "GA"
+  
+  elec_ga_dis <- aggregate(discharges ~ ICD + agegrp_v3, elec_ga, FUN = sum, na.rm = TRUE)
+  colnames(elec_ga_dis)[3] <- "discharges"
+  elec_ga_dis$admi <-"elective"
+  elec_ga_dis$ward <- "GA"
+  
+  emerg_cc_dis <- aggregate(discharges ~ ICD + agegrp_v3, emerg_cc,FUN = sum, na.rm = TRUE)
+  colnames(emerg_cc_dis)[3] <- "discharges"
+  emerg_cc_dis$admi <- "emergency"
+  emerg_cc_dis$ward <- "CC"
+  
+  elec_cc_dis <- aggregate(discharges ~ ICD + agegrp_v3, elec_cc, FUN = sum, na.rm = TRUE)
+  colnames(elec_cc_dis)[3] <- "discharges"
+  elec_cc_dis$admi <- "elective"
+  elec_cc_dis$ward <- "CC"
+  
+  tot_df <- dplyr::bind_rows(emerg_ga_dis, emerg_cc_dis, elec_ga_dis, elec_cc_dis)
+  dis_df <- dplyr::left_join(dis_df, tot_df)
+  toc()
+  
+  end_time <- Sys.time()
+  
+  print("Total time spent:")
+  print(end_time - start_time)
+  return(list(LoS_df, admi_df, deaths_df, dis_df))
+  
+}
 
 
 
+failure_func_try <- function(cohort23, csv_survival_name, pdf_to_export, current_ICD){
+  
+  out <- tryCatch({
+    message("Trying out the failure function")
+    
+    failure_function(cohort23 = cohort23, csv_survial_name = csv_survival_name,
+                     pdf_to_export = pdf_to_export, 
+                     current_ICD = current_ICD)   
+  },
+  error = function(cond){
+    message(paste("Cohort 1 to 2 failure function not working for ICD:", current_ICD))
+    message(cond)
+    return(NULL)
+  },
+  warning = function(cond){
+    message(paste("Following warning message for ICD:", current_ICD))
+    message(cond)
+    return(out)
+    
+  },
+  finally = {
+    message(paste("Processed cohort 1 to 2 for ICD:", current_ICD))
+  }
+  
+  
+  )
+  
+  
+  return(out)
+}
+
+failure_function <- function(cohort23, csv_survial_name,
+                             pdf_to_export = "electives_to_emergencies_survival_plot",
+                             current_ICD){
+  ## Need to double check whether Waiting time is in there!
+  start_time <- Sys.time()
+  
+  print("Failure function for electives to emergencies")
+  if(!("WaitingTime" %in% colnames(cohort23))){
+    cohort23 <- make_wt_variable(cohort23)
+    WT_colname <- which(colnames(cohort23) == "WT")
+    colnames(cohort23)[WT_colname] <- "WaitingTime"
+  }
+  
+  # 1.1 Fit survival function
+  
+  survival_df <- NULL
+  ages <- unique(cohort23$agegrp_v3)
+  
+  for(k in 1:length(ages)){
+    current_age_dat <- cohort23[cohort23$agegrp_v3 == ages[k],]
+    surv_object <- Surv(time = current_age_dat$WaitingTime, event = current_age_dat$Elective2Emergency)
+    e2e <- survfit(surv_object ~ 1, data = current_age_dat, type = "kaplan-meier")
+    
+    age_rows <- cbind.data.frame(e2e$time, e2e$surv, rep(ages[k], length(e2e$surv)), e2e$cumhaz,
+                                 e2e$std.err)
+    colnames(age_rows) <- c("time","survival","age_group", "cumulative_hazard", "std_err_hazard")
+    survival_df <- rbind.data.frame(survival_df, age_rows)
+    colnames(survival_df) <- c("time","survival","age_group", "cumulative_hazard", "std_err_hazard")
+    
+  }
+  
+  
+  survival_df$ICD <- current_ICD
+  # 1.2 Plot survival function
+  
+  
+  
+  survival_plot_2 <- ggplot(data = survival_df, aes(x = time, y = survival, group = age_group, colour = age_group)) +
+    geom_line() + xlab("Waiting time (days)") + ylab("Survival probability") + ylim(c(0,1)) + labs(colour = "Age group") +
+    ggtitle("Survival function")
+  
+  
+  # 1.3 Plot failure function
+  cumhaz_plot_2 <- ggplot(data = survival_df, aes(x = time, y = cumulative_hazard, group = age_group, colour = age_group)) +
+    geom_line() + xlab("Waiting time (days)") + ylab("Failure probability") + ylim(c(0,1)) + labs(colour = "Age group") +
+    ggtitle("Failure function (cumulative hazard)")
+  
+  
+  # 1.4 Put failure function and standard errors into a df --> export to csv
+  #### This needs to be in the correct dir, from the setwd from above ####
+  
+  pdf(file = pdf_to_export, paper = "a4r")
+  
+  print(survival_plot_2)
+  print(cumhaz_plot_2)
+  
+  dev.off()
+  
+  write.csv(survival_df,
+            file = csv_survial_name,
+            row.names = FALSE)
+  
+  ## get the 7 day multiples ##
+  
+  out_df <- data.frame(matrix(ncol = 5, nrow = 3))
+  colnames(out_df) <- c("age","ICD","day_7","mean_7","median_7")
+  out_df$age <- ages
+  out_df$ICD <- current_ICD
+  
+  for(k in 1:length(ages)){
+    
+    ## get day 7 vals first 
+    day_7s <- survival_df[survival_df$time == 7 &
+                            survival_df$age == out_df$age[k],]
+    if(nrow(day_7s) == 1){
+      out_df$day_7[k] <- day_7s$cumulative_hazard
+    }else{
+      day_7s <- survival_df[survival_df$time < 7 &
+                              survival_df$age == out_df$age[k],]
+      if(nrow(day_7s) == 0){
+        out_df$day_7[k] <- 0
+      }else{
+        out_df$day_7[k] <- max(day_7s$cumulative_hazard)
+      }
+      
+    }
+    ## now multiples 
+    seven_mults <- seq(7, max(survival_df$time), by = 7)
+    
+    actual_vec <- out_df$day_7[k]
+    multi_df <- out_df$day_7[k]
+    age_surve <- survival_df[survival_df$age == out_df$age[k],]
+    
+    for(j in 2:length(seven_mults)){
+      current_mult_vals <- age_surve[age_surve$time > seven_mults[j-1] &
+                                       age_surve$time <= seven_mults[j],]
+      if(nrow(current_mult_vals) == 0){
+        multi_df <- append(multi_df, 0)
+        actual_vec <- append(actual_vec, actual_vec[length(actual_vec)])
+      }else{
+        diff_val <- max(current_mult_vals$cumulative_hazard) - actual_vec[length(actual_vec)]
+        multi_df <- append(multi_df, diff_val)
+        actual_vec <- append(actual_vec, max(current_mult_vals$cumulative_hazard))
+      }
+      
+    }
+    
+    out_df$mean_7[k] <- mean(actual_vec)
+    out_df$median_7[k] <- median(actual_vec)
+    
+  }
+  
+  end_time <- Sys.time()
+  print(end_time - start_time)
+  
+  return(list(survival_df, out_df))
+  
+}
 
 
 

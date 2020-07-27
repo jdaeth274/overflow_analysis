@@ -10,7 +10,7 @@ require(data.table)
 ## Load HES data
 system.time(transitions_data_whole <- fread("D:/Overflows/data/HES_APC_CC_0913_transitions_all_ICD.csv"))
 # keep variables you need
-hes_data <- select(transitions_data_whole, c("procode3","admimeth_C","EpiEnd_FY","SUSHRGep", "ICD", "agegrp_v3", "admimeth_C"))
+hes_data <- select(transitions_data_whole, c("procode3","admimeth_C","EpiEnd_FY","SUSHRGep", "ICD", "agegrp_v3", "admimeth_C", "WaitingTime"))
 
 ##############################################################################################################
 ## Load costs data
@@ -170,7 +170,7 @@ electives_merged <- subset(full_mergedcosts, admimeth_C == 1)
 quantilewt <- electives_merged %>% group_by(ICD, agegrp_v3) %>%
   do(data.frame(t(quantile(.$WaitingTime, props = c(0.25, 0.50, 0.75)))))
 
-quantilewt <- rename(quantilewt, min = X0., p25 = X25., median = X50., p75 = X75., max = X100.)
+quantilewt <- rename(quantilewt, min = X0., p25 = X25., p50 = X50., p75 = X75., max = X100.)
 
 # at each quantile, what is the avg, sd, min, 25, 50, 75, max cost?
 # identify which electives fall within each quantile
@@ -191,34 +191,34 @@ electives_p75100 <- subset(electives_wtquant, p75100 == 1)
 
 # quantiles of costs within each WT quantile
 quant_costs_wtp025 <- electives_p025 %>% group_by(ICD, agegrp_v3, p025) %>%
-  do(data.frame(t(quantile(.$UNIT.COST, props = c(0.25, 0.50, 0.75)))))
+  do(data.frame(t(quantile(.$unitcost, props = c(0.25, 0.50, 0.75)))))
 
 quant_costs_wtp2550 <- electives_p2550 %>% group_by(ICD, agegrp_v3, p2550) %>%
-  do(data.frame(t(quantile(.$UNIT.COST, props = c(0.25, 0.50, 0.75)))))
+  do(data.frame(t(quantile(.$unitcost, props = c(0.25, 0.50, 0.75)))))
 
 quant_costs_wtp5075 <- electives_p5075 %>% group_by(ICD, agegrp_v3, p5075) %>%
-  do(data.frame(t(quantile(.$UNIT.COST, props = c(0.25, 0.50, 0.75)))))
+  do(data.frame(t(quantile(.$unitcost, props = c(0.25, 0.50, 0.75)))))
 
 quant_costs_wtp75100 <- electives_p75100 %>% group_by(ICD, agegrp_v3, p75100) %>%
-  do(data.frame(t(quantile(.$UNIT.COST, props = c(0.25, 0.50, 0.75)))))
+  do(data.frame(t(quantile(.$unitcost, props = c(0.25, 0.50, 0.75)))))
 
 # mean and sd cost within each WT quantile
-avg_costs_wtp025 <- do.call(data.frame, aggregate(electives_p025$UNIT.COST, 
+avg_costs_wtp025 <- do.call(data.frame, aggregate(electives_p025$unitcost, 
                                                   list(electives_p025$ICD, electives_p025$agegrp_v3),
                                                   function(x) c(mean = mean(x), sd = sd(x))))
 colnames(avg_costs_wtp025) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
 
-avg_costs_wtp2550 <- do.call(data.frame, aggregate(electives_p2550$UNIT.COST, 
+avg_costs_wtp2550 <- do.call(data.frame, aggregate(electives_p2550$unitcost, 
                                                    list(electives_p2550$ICD, electives_p2550$agegrp_v3),
                                                    function(x) c(mean = mean(x), sd = sd(x))))
 colnames(avg_costs_wtp2550) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
 
-avg_costs_wtp5075 <- do.call(data.frame, aggregate(electives_p5075$UNIT.COST, 
+avg_costs_wtp5075 <- do.call(data.frame, aggregate(electives_p5075$unitcost, 
                                                    list(electives_p5075$ICD, electives_p5075$agegrp_v3),
                                                    function(x) c(mean = mean(x), sd = sd(x))))
 colnames(avg_costs_wtp5075) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
 
-avg_costs_wtp75100 <- do.call(data.frame, aggregate(electives_p75100$UNIT.COST, 
+avg_costs_wtp75100 <- do.call(data.frame, aggregate(electives_p75100$unitcost, 
                                                     list(electives_p75100$ICD, electives_p75100$agegrp_v3),
                                                     function(x) c(mean = mean(x), sd = sd(x))))
 colnames(avg_costs_wtp75100) <- c("ICD","agegrp_v3","avg_cost","sd_cost")

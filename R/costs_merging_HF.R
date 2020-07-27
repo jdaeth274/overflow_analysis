@@ -226,17 +226,17 @@ write.csv(costs_export,
           row.names = FALSE,
           quote = FALSE)
 
-##############################################################################################################
-# Now calculate average unit cost per patient group across waiting time quantiles for electives (eg. for p25 WT, what is the cost p25, p50, p75, mean, sd)
+###########################################################################################
+# Now calculate average unit cost per patient group across waiting time quartiles for electives (eg. for p25 WT, what is the cost p25, p50, p75, mean, sd)
 electives_merged <- subset(full_mergedcosts, admimeth_C == 1)
 
 quantilewt <- electives_merged %>% group_by(ICD, agegrp_v3) %>%
   do(data.frame(t(quantile(.$WaitingTime, props = c(0.25, 0.50, 0.75)))))
 
-quantilewt <- rename(quantilewt, min = X0., p25 = X25., median = X50., p75 = X75., max = X100.)
+quantilewt <- rename(quantilewt, min = X0., p25 = X25., p50 = X50., p75 = X75., max = X100.)
 
-# at each quantile, what is the avg, sd, min, 25, 50, 75, max cost?
-# identify which electives fall within each quantile
+# at each quartiles, what is the avg, sd, min, 25, 50, 75, max cost?
+# identify which electives fall within each quartiles
 electives_wtquant <- left_join(electives_merged, quantilewt,
                                by = c("ICD","agegrp_v3"))
 
@@ -252,7 +252,7 @@ electives_p2550 <- subset(electives_wtquant, p2550 == 1)
 electives_p5075 <- subset(electives_wtquant, p5075 == 1)
 electives_p75100 <- subset(electives_wtquant, p75100 == 1)
 
-# quantiles of costs within each WT quantile
+# quantiles of costs within each WT quartiles
 quant_costs_wtp025 <- electives_p025 %>% group_by(ICD, agegrp_v3, p025) %>%
   do(data.frame(t(quantile(.$unitcost, props = c(0.25, 0.50, 0.75)))))
 
@@ -265,7 +265,7 @@ quant_costs_wtp5075 <- electives_p5075 %>% group_by(ICD, agegrp_v3, p5075) %>%
 quant_costs_wtp75100 <- electives_p75100 %>% group_by(ICD, agegrp_v3, p75100) %>%
   do(data.frame(t(quantile(.$unitcost, props = c(0.25, 0.50, 0.75)))))
 
-# mean and sd cost within each WT quantile
+# mean and sd cost within each WT quartiles
 avg_costs_wtp025 <- do.call(data.frame, aggregate(electives_p025$unitcost, 
                                                   list(electives_p025$ICD, electives_p025$agegrp_v3),
                                                   function(x) c(mean = mean(x), sd = sd(x))))
@@ -286,7 +286,7 @@ avg_costs_wtp75100 <- do.call(data.frame, aggregate(electives_p75100$unitcost,
                                                     function(x) c(mean = mean(x), sd = sd(x))))
 colnames(avg_costs_wtp75100) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
 
-# combine mean, sd, and quantile costs at each WT quantile
+# combine mean, sd, and quantile costs at each WT quartiles
 costs_wtp025 <- left_join(avg_costs_wtp025, quant_costs_wtp025,
                           by = c("ICD" = "ICD","agegrp_v3" = "agegrp_v3"))
 costs_wtp025 <- rename(costs_wtp025, min = X0., p25 = X25., median = X50., p75 = X75., max = X100.)
