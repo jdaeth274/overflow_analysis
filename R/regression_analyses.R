@@ -164,7 +164,8 @@ covid_regression <- function(covid_data){
   ## Create the separate cc and ga datasets and outcome variable by day 7
   
   covid_cc <- covid_data[covid_data$cc == 1,]
-  covid_ga <- covid_data[covid_data$cc == 0,]
+  
+  covid_ga <- covid_data[-which(is.na(covid_data$ga_transitions)),]
   
   covid_cc$outcome <- NA
   
@@ -176,10 +177,10 @@ covid_regression <- function(covid_data){
   
   covid_ga$outcome <- NA
   
-  covid_ga[covid_ga$cc_LoS >= 7 ,"outcome"]<-"GA"
-  covid_ga[covid_ga$cc_LoS >= 0 & covid_ga$cc_LoS < 7 & covid_ga$cc_transitions == 3,"outcome"] <- "Dead"
-  covid_ga[covid_ga$cc_LoS >= 0 & covid_ga$cc_LoS < 7 & covid_ga$cc_transitions == 2,"outcome"] <- "CC"
-  covid_ga[covid_ga$cc_LoS >= 0 & covid_ga$cc_LoS < 7 & covid_ga$cc_transitions == 1,"outcome"] <- "Discharged"
+  covid_ga[covid_ga$GA_LoS >= 7 ,"outcome"]<-"GA"
+  covid_ga[covid_ga$GA_LoS >= 0 & covid_ga$GA_LoS < 7 & covid_ga$ga_transitions == 3,"outcome"] <- "Dead"
+  covid_ga[covid_ga$GA_LoS >= 0 & covid_ga$GA_LoS < 7 & covid_ga$ga_transitions == 2,"outcome"] <- "CC"
+  covid_ga[covid_ga$GA_LoS >= 0 & covid_ga$GA_LoS < 7 & covid_ga$ga_transitions == 1,"outcome"] <- "Discharged"
   
   covid_cc$death <- ifelse(covid_cc$outcome == "Dead" , 1,0)
   covid_cc$discharges <- ifelse(covid_cc$outcome == "Discharged", 1, 0)
