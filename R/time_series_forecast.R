@@ -157,8 +157,8 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
           current_group <- current_group + 1
           temp<-ts_data[ts_data$agegrp_v3==age &
                        ts_data$ICD==d,]
-          temp <- temp[temp$date > as.Date(cutoff_dates[1]) &
-                         temp$date < as.Date(cutoff_dates[2]) ,]
+          temp <- temp[temp$date > as.Date(cut_off_dates[1]) &
+                         temp$date < as.Date(cut_off_dates[2]) ,]
           
           if(cohort3 == TRUE){
             
@@ -871,7 +871,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                                      admit_type = "Emergency",
                                      train_date = train_date,
                                      only_ICD = single_icd,
-                                     forecast_period = forecast_period, cutoff_dates = cutoff_dates)
+                                     forecast_period = forecast_period, cut_off_dates = cutoff_dates)
   print("Running electives pool, median wait and prop straight to cc")
   test_cohort_1_new_median <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_med_plot,
                                          forecast_admissions = forecast_admis, forecast_frail = forecast_frail,
@@ -879,27 +879,27 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                                          admit_type = "Elective", cohort3 = TRUE,
                                          wait_time_col = "p50_WT_ICDc", train_date = train_date,
                                          forecast_period = forecast_period,
-                                         only_ICD = single_icd, cutoff_dates = cutoff_dates)
+                                         only_ICD = single_icd, cut_off_dates = cutoff_dates)
   print("Running electives mean wait and prop frail")
   test_cohort_1_new_mean <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_mean_plot,
                                               forecast_admissions = forecast_admis, forecast_wait = forecast_WT, forecast_frail = forecast_frail,
                                          admit_type = "Elective", cohort3 = TRUE,
                                          wait_time_col = "mean_WT_ICDc", diagnostics_only = FALSE,
                                          train_date = train_date, only_ICD = single_icd,
-                                         forecast_period = forecast_period, cutoff_dates = cutoff_dates)
+                                         forecast_period = forecast_period,  cut_off_dates = cutoff_dates)
   }
   print("Running Elective prop bundle")
   cohort_1_prop_bundle_forecast <- forecast_bundle_makeup(ts_data = cohort_1_prop_bundles,
                                                           admit_type = "Elective",
                                                           results_name = cohort_1_prop_plots,
                                                           forecast_period = forecast_period,
-                                                          train_date = train_date, cutoff_dates = cutoff_dates)
+                                                          train_date = train_date,  cutoff_dates = cutoff_dates)
   print("Running Emergency prop bundle")
   cohort_3_prop_bundle_forecast <- forecast_bundle_makeup(ts_data = cohort_3_prop_bundles,
                                                           results_name = cohort_3_prop_plots,
                                                           admit_type = "Emergency",
                                                           forecast_period = forecast_period,
-                                                          train_date = train_date, cutoff_dates = cutoff_dates)
+                                                          train_date = train_date,  cutoff_dates = cutoff_dates)
   
   ###############################################################################
   ## Lets get the neoplasms out of there! #######################################

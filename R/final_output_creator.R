@@ -2,8 +2,8 @@
 ## Script to sum up results and output excel sheet ############################
 ###############################################################################
 
-sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts, forecast_length, COVID_preds,
-                            out_sheet){
+sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts, forecast_length, COVID_preds, week_nums,
+                            covid_probs,out_sheet){
   require(dplyr)  
   require(openxlsx)
 
@@ -98,128 +98,58 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   
   ## pi_y for transitions ##
   print("Working on the pi y transitions")
+  
   elec_res <- reg_res[[1]][[1]]
   emerg_res <- reg_res[[2]][[1]]
   coef_df <- reg_res[[1]][[2]]
+  covid_res <- covid_probs
+  tot_pi_y <- NULL
   
-  ga_emerg <- grep("ga",x = emerg_res$patient_group)
-  emerg_ga_sa <- emerg_res[ga_emerg,]
-  emerg_cc_sa <- emerg_res[-ga_emerg,]
+  for(weeker in week_nums){
   
-  ga_elec <- grep("ga", x = elec_res$patient_group)
-  elec_ga_sa <- elec_res[ga_elec,]
-  elec_cc_sa <- elec_res[-ga_elec,]
-  
-  ga_coef_rows <- grep("ga", x = coef_df$patient_group)
-  ga_coef <- coef_df[ga_coef_rows,]
-  cc_coef <- coef_df[-ga_coef_rows,]
-  
-  pi_y_a_row <- rep(c("N","E"), each = 4*length(pi_x_df$p))
-  pi_y_p_row <- rep(pi_x_df$p, each = 8)
-  pi_y_s_row <- rep(rep(c("G","C"), each = 4), length(pi_x_df$p))
-  pi_y_sbar_row <- rep(c("H","C","D","G","H","G","D","C"), length(pi_x_df$p))
-  
-  
-  pi_y_df <- data.frame(matrix(0, nrow = length(pi_y_p_row), ncol = 7))
-  colnames(pi_y_df) <- c("a","p","s","sbar","pi_y","coeff","variance")
-  pi_y_df$a <- pi_y_a_row
-  pi_y_df$p <- pi_y_p_row
-  pi_y_df$s <- pi_y_s_row
-  pi_y_df$sbar <- pi_y_sbar_row
-  
-  current_row <- 1
-  elec_emerg_break <- 3*length(icds_in_play)
-  
-  trans_icds_in_play <- rep(icds_in_play, 2)
-  
-  for(icdee in trans_icds_in_play){
-    for(age in c(1,2,3)){
-      current_rows <- seq(current_row*8 - 7, current_row*8) ## Looking at the rows for the current age & icd comboi
-      if(current_row <= elec_emerg_break){ ## Checking if we're in the elective or emergency section of Results
-        if(icdee %in% elec_ga_sa$ICD){ ## Check if comboi is present in GA and CC res separtely, just in case we decide to drop symmetry in the future
-          icdee_rows <- elec_ga_sa[elec_ga_sa$ICD == icdee,]
-          if(age %in% icdee_rows$age){
-            age_rows_ga <- icdee_rows[icdee_rows$age == age,]
-            seven_rows <- age_rows_ga[grep("seven",age_rows_ga$WT),]
-            Discharge_trans <- seven_rows[seven_rows$variable == "Discharged","value"][1]
-            CC_trans <- seven_rows[seven_rows$variable == "CC","value"][1]
-            death_trans <- seven_rows[seven_rows$variable == "Dead","value"][1]
-            GA_trans <- seven_rows[seven_rows$variable == "GA","value"][1]
-            pi_y_df[current_rows[1:4],"pi_y"] <- c(Discharge_trans,CC_trans, death_trans, GA_trans)
-            if(icdee %in% ga_coef$ICD){
-              icdee_rows <- ga_coef[ga_coef$ICD == icdee,]
-              if(age %in% icdee_rows$age){
-                age_rows_ga <- icdee_rows[icdee_rows$age == age,]
-                pi_y_df[current_rows[1:4],"coeff"] <- age_rows_ga$coef[c(3,2,4,1)]
-              }
-            }
-            
-          }
-          
-          
-        }
-        if(icdee %in% elec_cc_sa$ICD){
-          icdee_rows_cc <- elec_cc_sa[elec_cc_sa$ICD == icdee,]
-          if(age %in% icdee_rows_cc$age){
-            age_rows_ga <- icdee_rows_cc[icdee_rows_cc$age == age,]
-            seven_rows <- age_rows_ga[grep("seven",age_rows_ga$WT),]
-            Discharge_trans <- seven_rows[seven_rows$variable == "Discharged","value"][1]
-            CC_trans <- seven_rows[seven_rows$variable == "CC","value"][1]
-            death_trans <- seven_rows[seven_rows$variable == "Dead","value"][1]
-            GA_trans <- seven_rows[seven_rows$variable == "GA","value"][1]
-            pi_y_df[current_rows[5:8],"pi_y"] <- c(Discharge_trans,GA_trans, death_trans, CC_trans)
-            if(icdee %in% cc_coef$ICD){
-              icdee_rows <- cc_coef[cc_coef$ICD == icdee,]
-              if(age %in% icdee_rows$age){
-                age_rows_cc <- icdee_rows[icdee_rows$age == age,]
-                pi_y_df[current_rows[5:8],"coeff"] <- age_rows_cc$coef[c(3,2,4,1)]
-              }
-            }
-            
-          }
-        }
+    current_week_res_elec <- elec_res[elec_res$week == weeker,]
+    current_week_res_emerg <- emerg_res[emerg_res$week == weeker,]
+    current_coef_df <- coef_df[coef_df$week == weeker,]
+    current_covid_rows <- covid_res[covid_res$week == weeker,]
+    
+    ga_coef_rows <- grep("ga", x = coef_df$patient_group)
+    ga_coef <- coef_df[ga_coef_rows,]
+    cc_coef <- coef_df[-ga_coef_rows,]
+    
+    pi_y_a_row <- rep(c("N","E"), each = 4*length(pi_x_df$p))
+    pi_y_p_row <- rep(pi_x_df$p, each = 8)
+    pi_y_s_row <- rep(rep(c("G","C"), each = 4), length(pi_x_df$p))
+    pi_y_sbar_row <- rep(c("H","C","D","G","H","G","D","C"), length(pi_x_df$p))
       
-      
-      }else{
-        if(icdee %in% emerg_ga_sa$ICD){
-          icdee_rows_ga <- emerg_ga_sa[emerg_ga_sa$ICD == icdee,]
-          if(age %in% icdee_rows_ga$age){
-            age_rows_ga <- icdee_rows_ga[icdee_rows_ga$age == age,]
-            seven_rows <- age_rows_ga[grep("mean",age_rows_ga$WT),]
-            Discharge_trans <- seven_rows[seven_rows$variable == "Discharged","value"][1]
-            CC_trans <- seven_rows[seven_rows$variable == "CC","value"][1]
-            death_trans <- seven_rows[seven_rows$variable == "Dead","value"][1]
-            GA_trans <- seven_rows[seven_rows$variable == "GA","value"][1]
-            pi_y_df[current_rows[1:4],"pi_y"] <- c(Discharge_trans,CC_trans, death_trans, GA_trans)
-            
-          }
-        }
-        if(icdee %in% emerg_cc_sa$ICD){
-          icdee_rows_cc <- emerg_cc_sa[emerg_cc_sa$ICD == icdee,]
-          if(age %in% icdee_rows_cc$age){
-            age_rows_cc <- icdee_rows_cc[icdee_rows_cc$age == age,]
-            seven_rows <- age_rows_cc[grep("mean",age_rows_cc$WT),]
-            Discharge_trans <- seven_rows[seven_rows$variable == "Discharged","value"][1]
-            CC_trans <- seven_rows[seven_rows$variable == "CC","value"][1]
-            death_trans <- seven_rows[seven_rows$variable == "Dead","value"][1]
-            GA_trans <- seven_rows[seven_rows$variable == "GA","value"][1]
-            pi_y_df[current_rows[5:8],"pi_y"] <- c(Discharge_trans,GA_trans, death_trans, CC_trans)
-            
-          }
-        }
+    
+    pi_y_df <- data.frame(matrix(0, nrow = length(pi_y_p_row), ncol = 4))
+    colnames(pi_y_df) <- c("a","p","s","sbar")
+    pi_y_df$a <- pi_y_a_row
+    pi_y_df$p <- pi_y_p_row
+    pi_y_df$s <- pi_y_s_row
+    pi_y_df$sbar <- pi_y_sbar_row
+    
+    ## left join elecs
+    
+    emerg_elec <- dplyr::bind_rows(current_week_res_elec, current_week_res_emerg)
+    
+    pi_y_df <- dplyr::left_join(pi_y_df,emerg_elec, by = c("a" = "a","p" ="p",
+                                                           "s" = "s","sbar" = "sbar"))
+    
+    
+    
+    
+    pi_y_df <- dplyr::bind_rows(pi_y_df, current_covid_rows)
+    
+    
+    pi_y_df[which(is.na(pi_y_df$pi_y)), "pi_y"] <- 0
+    pi_y_df[which(is.na(pi_y_df$week)), "week"] <- weeker
+    
+    tot_pi_y <- dplyr::bind_rows(tot_pi_y, pi_y_df)
         
-        
-        
-      }
-      
-      print(paste(icdee,age, pi_y_df[current_rows[1],"p"]))
-      current_row <- current_row + 1
-      
   }
   
   
-  }
-
   
   ## pi z proportions ##
   print("On the pi z transitions")
@@ -356,7 +286,7 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   
   
   df_list <- list("phi1" = phi_df, "phi2" = phi2_df, "phi3" = phi3_df,
-                  "pi_x" = pi_x_df, "pi_y" = pi_y_df,
+                  "pi_x" = pi_x_df, "pi_y" = tot_pi_y,
                   "pi_z" = pi_z_df, "ICDprop" = prop_df,
                   "x0" = x0_df, "y0" = y0_df)
   

@@ -52,14 +52,16 @@ vroom_write(transitions_data,
 elective_no_trends <- regression_cluster_set_up(patient_group = "elective",
                                                 hes_data = transitions_data, forecast_length = 52,
                                                 forecast_start = forecast_start_date,
-                                                month_trend = FALSE, time_trend = FALSE, week_num = 1)
+                                                month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5), failure_function_run = FALSE)
 
 emergency_no_trends <- regression_cluster_set_up(patient_group = "emergency",
                                                  hes_data = transitions_data, forecast_length = 52,
                                                  forecast_start = forecast_start_date,
-                                                 month_trend = FALSE, time_trend = FALSE, week_num = 1)
+                                                 month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5), failure_function_run = FALSE)
 failure_func <- failure_func_setup(transitions_data, month_trend = FALSE,
                                    time_trend = FALSE)
+
+regression_results <- list(elective_no_trends, emergency_no_trends, failure_func)
 
 ## time_series ##
 time_series_data <- time_series_creator(hes_data = transitions_data, num_cores = core_nums, forecast_date = forecast_start_date,
@@ -68,7 +70,7 @@ time_series_data <- time_series_creator(hes_data = transitions_data, num_cores =
 times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data, train_date = as.Date(forecast_start_date),
                                             forecast_period = 52,  base_dir = "./",
                                             run_admis = TRUE, forecast_admis = TRUE, forecast_WT = TRUE, forecast_frail = TRUE,
-                                            cutoff_dates = cutoff_dates)
+                                            cutoff_dates = cut_off_dates)
 
 ## Sum up file 
 covid_csv <- read.csv(file = covid_csv_loc,
@@ -76,6 +78,6 @@ covid_csv <- read.csv(file = covid_csv_loc,
 
 pi_y_df <- sum_up_function(reg_res = regression_results , time_series_data_res = time_series_data,
                            time_series_forecasts = times_series_forecasts, forecast_length = 52, COVID_preds = covid_csv,
-                           out_sheet = excel_sheet)
+                           out_sheet = excel_sheet, covid_probs = covid_probs, week_nums = seq(1,5))
 
 

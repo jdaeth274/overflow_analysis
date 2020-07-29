@@ -237,8 +237,13 @@ costs_function <- function(transitions_data_whole, costs_directory, FY = 1213, o
   costs_export <- select(costs, -c(ICD, agegrp, admimeth, disease, age))
   
   # Write out costs_export to csv
+  if(substr(output_dir,nchar(output_dir),nchar(output_dir)) != "/")
+    output_dir <- paste(output_dir,"/",sep = "")
+  
+  costs_export_loc <- paste(output_dir,"costs.csv")
+  
   write.csv(costs_export,
-            file = "D:/Overflows/output/costs.csv",
+            file = costs_export_loc,
             row.names = FALSE,
             quote = FALSE)
   
@@ -324,23 +329,26 @@ costs_function <- function(transitions_data_whole, costs_directory, FY = 1213, o
   costs_wtp75100 <- subset(costs_wtp75100, select = -p75100)
   
   # write out to csv
+  wtp025_loc <- paste(output_dir,"costs_p025.csv")
+  
   write.csv(costs_wtp025,
-            file = "D:/Overflows/output/costs_p025.csv", 
+            file = wtp025_loc, 
             row.names = FALSE,
             quote = FALSE)
   
+  wtp2550_loc <- paste(output_dir,"costs_p2550.csv")
   write.csv(costs_wtp2550,
-            file = "D:/Overflows/output/costs_p2550.csv", 
+            file = wtp2550_loc,
             row.names = FALSE,
             quote = FALSE)
-  
+  wtp5075_loc <- paste(output_dir,"costs_p5075.csv")
   write.csv(costs_wtp5075,
-            file = "D:/Overflows/output/costs_p5075.csv", 
+            file = wtp5075_loc,
             row.names = FALSE,
             quote = FALSE)
-  
+  wtp75100_loc <- paste(output_dir,"costs_p75100.csv")
   write.csv(costs_wtp75100,
-            file = "D:/Overflows/output/costs_p75100.csv", 
+            file = wtp75100_loc,
             row.names = FALSE,
             quote = FALSE)
 }
