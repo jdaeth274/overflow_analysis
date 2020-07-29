@@ -13,14 +13,14 @@ source(file = "./Rscript/R/time_series_creator.R")
 source(file = "./Rscript/R/time_series_forecast.R")
 source(file = "./Rscript/R/regression_analyses.R")
 source(file = "./Rscript/R/final_output_creator.R")
-
+source(file = "./Rscript/R/costs_merging_HF.R")
 ## First step to load up HES dataset ##
 
 input_args <- commandArgs(trailingOnly = TRUE)
 
-if(length(input_args) != 9){
+if(length(input_args) != 10){
   cat(usage)
-  cat("You have: ", length(input_args)," need: 9")
+  cat("You have: ", length(input_args)," need: 10")
   quit(status = 1)
 }
 
@@ -33,7 +33,7 @@ core_nums <- input_args[6]
 covid_csv_loc <- input_args[7]
 excel_sheet <- input_args[8]
 covid_prob_locs <- input_args[9]
-
+costs_dir <- input_args[10]
 cut_off_dates <- c(cut_off_date_1, cut_off_date_2)
 
 cohort_allocation <- cohort_set_up(num_cores = core_nums,
@@ -70,6 +70,11 @@ times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data
                                        forecast_period = 52,  base_dir = "./",
                                        run_admis = TRUE, forecast_admis = TRUE, forecast_WT = TRUE, forecast_frail = TRUE,
                                        cut_off_dates = cutoff_dates)
+
+## costs ##
+
+costs_res <- costs_function(transitions_data, costs_directory = costs_dir, FY = 1213, output_dir = "./")
+
 
 ## Sum up file 
 covid_csv <- read.csv(file = covid_csv_loc,

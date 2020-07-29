@@ -4,11 +4,6 @@
 # Lines where Fiona must change the file location: 26, 33-46, 222, 308-326
 ##############################################################################################################
 # Required packages
-require(stringr)
-require(dplyr)
-require(vroom)
-require(dtplyr)
-require(data.table)
 
 costs_function <- function(transitions_data_whole, costs_directory, FY = 1213, output_dir){
   
@@ -351,4 +346,10 @@ costs_function <- function(transitions_data_whole, costs_directory, FY = 1213, o
             file = wtp75100_loc,
             row.names = FALSE,
             quote = FALSE)
+  
+  
+  return(list(costs_export, costs_wtp025, costs_wtp2550, costs_wtp5075, costs_wtp75100))
+  
+  
+  
 }

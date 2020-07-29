@@ -2,6 +2,9 @@
 ## Packages required for overflows analysis ###################################
 ###############################################################################
 
+require(stringr)
+require(dtplyr)
+require(data.table)
 require(vroom)
 require(dplyr)
 require(plyr)
