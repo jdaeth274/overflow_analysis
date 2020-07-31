@@ -41,6 +41,9 @@ hes_transitions <- function(hes_dataset){
   }
   
   
+  
+  
+  
   ## Elective to Emergency 
   print("Electives to emergencies")
   hes_dataset$Elective2Emergency <- 0
@@ -124,11 +127,31 @@ hes_transitions <- function(hes_dataset){
   hes_dataset[hes_dataset$cc_start_flg == 1 & hes_dataset$cc == 1, "straighttocc"] <- 1
   hes_dataset[hes_dataset$cc_start_flg == 0 | hes_dataset$cc == 0, "straighttocc"] <- 0
   
+  ## update LOS
+  hes_dataset$GA_LoS_old <- hes_dataset$GA_LoS
+  hes_dataset$GA_LoS <- ga_length(hes_dataset)
+  hes_dataset <- hes_dataset[hes_dataset$GA_LoS >= 0,]
+  
   return(hes_dataset)
   
 }
 
-
+ga_length <- function(hes_data){
+  
+  ## take this as the epistart and epiend, due to patients with multiple episodes in one admission
+  
+  hes_data <- hes_data[,c("GA_LoS","cc_LoS","epiend_str","epistart_str","cc","ccstartdate_MDY","ccdisdate_MDY")]
+  
+  hes_data$GA_LoS_old <- hes_data$GA_LoS
+  hes_data$cc_LoS_old <- hes_data$cc_LoS
+  
+  ## 
+  
+  hes_data$GA_LoS <- ifelse(hes_data$cc == 1, as.Date(hes_data$ccstartdate_MDY,format = "%d%b%Y") - hes_data$epistart_str, hes_data$epiend_str - hes_data$epistart_str)
+  
+  return(hes_data$GA_LoS)  
+  
+}
 
 
 

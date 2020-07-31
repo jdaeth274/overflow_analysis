@@ -53,12 +53,14 @@ vroom_write(transitions_data,
 elective_no_trends <- regression_cluster_set_up(patient_group = "elective",
                                                 hes_data = transitions_data, forecast_length = 52,
                                                 forecast_start = forecast_start_date,
-                                                month_trend = FALSE, time_trend = FALSE, week_num = 1, wt_variable = "squared")
+                                                month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5), wt_variable = "squared",
+                                                failure_function_run = FALSE, half_week = TRUE)
 
 emergency_no_trends <- regression_cluster_set_up(patient_group = "emergency",
                                                  hes_data = transitions_data, forecast_length = 52,
                                                  forecast_start = forecast_start_date,
-                                                 month_trend = FALSE, time_trend = FALSE, week_num = 1)
+                                                 month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5),
+                                                 failure_function_run = FALSE)
 failure_func <- failure_func_setup(transitions_data, month_trend = FALSE,
                                    time_trend = FALSE)
 
@@ -84,6 +86,6 @@ covid_probs <- read.csv(file = covid_probs_loc,
 
 pi_y_df <- sum_up_function(reg_res = regression_results , time_series_data_res = time_series_data,
                 time_series_forecasts = times_series_forecasts, forecast_length = 52, COVID_preds = covid_csv,
-                out_sheet = excel_sheet, covid_probs = )
+                out_sheet = excel_sheet, covid_probs = covid_probs, week_nums = seq(1,5))
 
 
