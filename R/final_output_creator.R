@@ -2,8 +2,147 @@
 ## Script to sum up results and output excel sheet ############################
 ###############################################################################
 
+no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
+  ## Function called from within a week loop on the sum_up function 
+  ## Input:
+  ## covid_no_cc: The current weeks no_cc transition probabilities for COVID patients
+  ## icd_current_week_ga: The current weeks GA only transition probabilities
+  ## covid_cc: The current weeks covid transitions probs with CC
+  
+  ## Lets get the changes in the COVID values to work on first 
+  
+  covid_no_cc <- covid_no_cc[covid_no_cc$s == "G",]
+  covid_cc_ga <- covid_cc[covid_cc$s == "G",]
+  
+  transform_vec <- rep(0, 12)
+  out_df <- NULL
+  
+  for(k in 1:3){
+    current_rows <- c((k*4)-3,(k*4)-2,(k*4)-1,(k*4))  
+    current_age_cc_dat <- covid_cc_ga[current_rows,]
+    current_age_no_cc <- covid_no_cc[current_rows,]
+    
+    if(1 %in% current_age_no_cc$pi_y){
+      
+      transform_vec[current_rows] <- current_age_no_cc$pi_y
+      transform_vec[current_rows][which(transform_vec[current_rows] == 1)] <- 1 / current_age_cc_dat$pi_y[which(current_age_no_cc$pi_y == 1)]
+      
+      
+    }else{
+      
+      zero_rows <- which(current_age_no_cc$pi_y == 0)
+      transform_vec[current_rows][zero_rows] <- 0
+       
+      if(length(zero_rows) != 4){
+       non_zero_rows_cc <- current_age_cc_dat[-zero_rows,]
+       non_zero_rows_no <- current_age_no_cc[-zero_rows,]
+       
+       non_zero_rows_cc$pi_y <- non_zero_rows_cc$pi_y / sum(non_zero_rows_cc$pi_y)
+       non_zero_rows_no$pi_y <- non_zero_rows_no$pi_y / sum(non_zero_rows_no$pi_y)
+       
+       alpha_val <- (non_zero_rows_no$pi_y[1] / non_zero_rows_cc$pi_y[1]) - 1
+       beta_val <- (((1 + alpha_val)*non_zero_rows_cc$pi_y[1]) + (1 - non_zero_rows_cc$pi_y[1]) - 1) / (1 - non_zero_rows_cc$pi_y[1])
+       
+       transform_vec[current_rows][-zero_rows] <- c(1+alpha_val, rep((1- beta_val),(4-length(zero_rows) - 1)))
+       
+       
+      }
+      
+      
+      
+    }
+    
+    
+    
+  }
+  
+  
+  
+  icds_to_work_through <- nrow(icd_current_week_ga) / 12
+  add_ins <- data.frame(matrix(ncol = 8, nrow = 9,data = 0))
+  colnames(add_ins) <- colnames(covid_no_cc)
+  add_ins$s <- c("G","G_STAR","C")
+  add_ins$sbar <- c("G_STAR","G_STAR","G_STAR")
+  add_ins$week <- covid_no_cc$week[1]
+  
+  
+  for(k in 1:icds_to_work_through){
+    new_df <- NULL
+    print(k)
+    current_rows <- seq((k * 12) -11,k * 12)
+    current_dat_full <- icd_current_week_ga[current_rows,]
+    current_dat <- current_dat_full$pi_y
+    new_pi_y <- rep(0, 12)
+    
+    for(j in 1:3){
+      current_age_rows <- seq((j * 4) -3,j * 4)
+      current_4 <- current_dat[current_age_rows]
+      current_transform <- transform_vec[current_age_rows]
+      current_no_cc <- covid_no_cc[current_age_rows,"pi_y"]
+      
+      if(sum(current_4) != 0){
+        if(1 %in% current_no_cc){
+          new_pi_y[current_age_rows] <- current_no_cc
+        }else{
+          current_4[c(1,3,4)] <- current_4[c(1,3,4)] / sum(current_4[c(1,3,4)])
+          transformed_4 <- current_4 * transform_vec[current_age_rows]
+          trans_diff <- transformed_4[c(1,3,4)] - current_4[c(1,3,4)]
+          lhs_diff <- abs(trans_diff[1])
+          rhs_diff <- abs(sum(trans_diff[2:3]))
+          
+          if(lhs_diff > rhs_diff){
+            new_diff <- trans_diff[1] / (lhs_diff / rhs_diff)
+            trans_diff[1] <- new_diff
+          }else if(rhs_diff > lhs_diff){
+            new_diff <- trans_diff[2:3] / (rhs_diff / lhs_diff)
+            trans_diff[2:3] <- new_diff
+          }
+          
+          transformed_4[c(1,3,4)] <- current_4[c(1,3,4)] + trans_diff
+          new_pi_y[current_age_rows] <- transformed_4
+        }
+      }
+      
+      
+    }
+    
+    new_gstar <- current_dat_full
+    new_gstar$s <- "G_STAR"
+    new_gstar$pi_y <- new_pi_y
+    add_ins$a <- new_gstar$a[1]
+    add_ins$p <- new_gstar$p[c(1:3,5:7,9:11)]
+      
+    new_gstar <- dplyr::bind_rows(new_gstar, add_ins)
+    new_df <- dplyr::bind_rows(new_df, new_gstar)
+    
+    out_df <- dplyr::bind_rows(out_df, new_df)
+    
+  }
+  
+  ## Now lets get the 
+  
+  covid_gstar <- covid_no_cc
+  covid_gstar$s <- "G_STAR"
+  add_ins$a <- covid_gstar$a[1]
+  add_ins$p <- covid_gstar$p[c(1:3,5:7,9:11)]
+  covid_gstar <- dplyr::bind_rows(covid_gstar, add_ins)
+  out_df <- dplyr::bind_rows(out_df, covid_gstar)
+  
+  gstar_g_rows <- which(out_df$s == "G_STAR" & out_df$sbar == "G")
+  gstar_c_rows <- which(out_df$s == "G_STAR" & out_df$sbar == "C")
+  
+  
+  out_df[gstar_c_rows, "pi_y"] <- out_df$pi_y[gstar_g_rows]
+  out_df$pi_y[gstar_g_rows] <- 0
+  
+  return(out_df)
+  
+}
+
+
+
 sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts, forecast_length, COVID_preds, week_nums,
-                            covid_probs,out_sheet){
+                            covid_probs,out_sheet, covid_no_cc){
   require(dplyr)  
   require(openxlsx)
 
@@ -103,14 +242,18 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   emerg_res <- reg_res[[2]][[1]]
   coef_df <- reg_res[[1]][[2]]
   covid_res <- covid_probs
+  covid_no_cc_dat <- covid_no_cc
+  
   tot_pi_y <- NULL
   
   for(weeker in week_nums){
-  
+    
+    
     current_week_res_elec <- elec_res[elec_res$week == weeker,]
     current_week_res_emerg <- emerg_res[emerg_res$week == weeker,]
     current_coef_df <- coef_df[coef_df$week == weeker,]
     current_covid_rows <- covid_res[covid_res$week == weeker,]
+    current_non_cc_rows <- covid_no_cc_dat[covid_no_cc_dat$week == weeker,]
     
     ga_coef_rows <- grep("ga", x = coef_df$patient_group)
     ga_coef <- coef_df[ga_coef_rows,]
@@ -136,11 +279,12 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
     pi_y_df <- dplyr::left_join(pi_y_df,emerg_elec, by = c("a" = "a","p" ="p",
                                                            "s" = "s","sbar" = "sbar"))
     
+    pi_y_df[which(is.na(pi_y_df$pi_y)), "pi_y"] <- 0
+    add_in_rows <- no_cc_probs(current_non_cc_rows,pi_y_df[pi_y_df$s == "G",], current_covid_rows)
     
-    
+    pi_y_df <- dplyr::bind_rows(pi_y_df, add_in_rows)
     
     pi_y_df <- dplyr::bind_rows(pi_y_df, current_covid_rows)
-    
     
     pi_y_df[which(is.na(pi_y_df$pi_y)), "pi_y"] <- 0
     pi_y_df[which(is.na(pi_y_df$week)), "week"] <- weeker

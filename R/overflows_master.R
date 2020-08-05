@@ -34,6 +34,7 @@ covid_csv_loc <- input_args[7]
 excel_sheet <- input_args[8]
 covid_prob_locs <- input_args[9]
 costs_dir <- input_args[10]
+covid_no_cc <- input_args[11]
 cut_off_dates <- c(cut_off_date_1, cut_off_date_2)
 
 cohort_allocation <- cohort_set_up(num_cores = core_nums,
@@ -50,19 +51,42 @@ vroom_write(transitions_data,
 ## regression analyses 
 
 
-elective_no_trends <- regression_cluster_set_up(patient_group = "elective",
+elective_no_trends_half <- regression_cluster_set_up(patient_group = "elective",
                                                 hes_data = transitions_data, forecast_length = 52,
                                                 forecast_start = forecast_start_date,
                                                 month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5), wt_variable = "squared",
                                                 failure_function_run = FALSE, half_week = TRUE)
+elective_no_trends_whole <- regression_cluster_set_up(patient_group = "elective",
+                                                     hes_data = transitions_data, forecast_length = 52,
+                                                     forecast_start = forecast_start_date,
+                                                     month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5), wt_variable = "squared",
+                                                     failure_function_run = FALSE, half_week = FALSE)
 
-emergency_no_trends <- regression_cluster_set_up(patient_group = "emergency",
+
+emergency_no_trends_half <- regression_cluster_set_up(patient_group = "emergency",
                                                  hes_data = transitions_data, forecast_length = 52,
                                                  forecast_start = forecast_start_date,
                                                  month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5),
-                                                 failure_function_run = FALSE)
-failure_func <- failure_func_setup(transitions_data, month_trend = FALSE,
-                                   time_trend = FALSE)
+                                                 failure_function_run = FALSE, half_week = TRUE)
+emergency_no_trends_whole <- regression_cluster_set_up(patient_group = "emergency",
+                                                      hes_data = transitions_data, forecast_length = 52,
+                                                      forecast_start = forecast_start_date,
+                                                      month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5),
+                                                      failure_function_run = FALSE, half_week = FALSE)
+
+elective_dat <- list(dplyr::bind_rows(elective_no_trends_half[[1]], elective_no_trends_whole[[1]]),
+                     dplyr::bind_rows(elective_no_trends_half[[2]], elective_no_trends_whole[[2]]))
+
+emergency_dat <- list(dplyr::bind_rows(emergency_no_trends_half[[1]], emergency_no_trends_whole[[1]]),
+                     dplyr::bind_rows(emergency_no_trends_half[[2]], emergency_no_trends_whole[[2]]))
+
+
+failure_func <- regression_cluster_set_up(patient_group = "failure",
+                                          hes_data = transitions_data, forecast_length = 52,
+                                          forecast_start = forecast_start_date,
+                                          month_trend = FALSE, time_trend = FALSE, week_num = seq(1,5),
+                                          failure_function_run = TRUE, half_week = TRUE)
+regression_results <- list(elective_dat, emergency_dat, failure_func[[3]])
 
 ## time_series ##
 time_series_data <- time_series_creator(hes_data = transitions_data, num_cores = core_nums, forecast_date = forecast_start_date,
@@ -86,6 +110,6 @@ covid_probs <- read.csv(file = covid_probs_loc,
 
 pi_y_df <- sum_up_function(reg_res = regression_results , time_series_data_res = time_series_data,
                 time_series_forecasts = times_series_forecasts, forecast_length = 52, COVID_preds = covid_csv,
-                out_sheet = excel_sheet, covid_probs = covid_probs, week_nums = seq(1,5))
+                out_sheet = excel_sheet, covid_probs = covid_probs, week_nums = seq(0.5,5,0.5), covid_no_cc = covid_no_cc)
 
 

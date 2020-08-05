@@ -582,6 +582,12 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
   for(current_week in week_num){
     whole_df <- NULL
     coef_df <- NULL
+    if(half_week){
+      append_week <- (current_week + (current_week - 1)) /2 
+    }else{
+      append_week <- current_week
+    }
+    
     
     for(j in 1:length(patient_group)){
 
@@ -629,7 +635,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         
         if(half_week){
           ## To get the half day vals first look at 3 days 
-          
+                
           
           days_of_stay_variable <- seq(3,length.out = length(week_num), by = 7)
           days_of_stay_variable <- c(-1,days_of_stay_variable)
@@ -680,7 +686,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
             if(nrow(patient_df) >0){
               if(patient_df$index[1] != 0){
                 
-                browser()
+        
                 hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
                 hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 2,"outcome"] <- "GA"
                 hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
@@ -1726,8 +1732,8 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
     
     
     toc()
-    whole_df$week <- current_week
-    coef_df$week <- current_week
+    whole_df$week <- append_week
+    coef_df$week <- append_week
     
     tot_whole_df <- dplyr::bind_rows(tot_whole_df, whole_df)
     tot_coef_df <- dplyr::bind_rows(tot_coef_df, coef_df)
@@ -1756,7 +1762,13 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
   
   for(current_week in week_num){
     whole_df <- NULL
-  
+    if(half_week){
+      append_week <- (current_week + (current_week - 1)) /2 
+    }else{
+      append_week <- current_week
+    }
+    
+    
     for(j in 1:length(patient_group)){
       print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
       tic(paste("Running for patient group:",patient_group[j]))
@@ -1844,7 +1856,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
             patient_df <- index_df[index_df$patient_group == patient_group[j],]
             if(nrow(patient_df) >0){
               if(patient_df$index[1] != 0){
-                browser()
+                
                 
                 hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
                 hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 2,"outcome"] <- "GA"
@@ -2602,7 +2614,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
         
     }
     
-    whole_df$week <- current_week
+    whole_df$week <- append_week
     tot_whole_df <- dplyr::bind_rows(tot_whole_df, whole_df)    
     
   }
@@ -2623,34 +2635,40 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
   whole_graph_df <- NULL
   coefdf_tot <- NULL
   failure_df <- NULL
+  actual_out_df <- NULL
   
   if(failure_function_run){
     ## use the try catch function to run through all the icds for the failure function to
     ## run on 
+    print("Narrowing down to cohort 1 & 2")
+    tic("Narrow down HES")
     cohort_12 <- hes_data[hes_data$cohort != 3,]
+    toc()
+    cohort_12 <- make_elective_cohort_variable(cohort_12)
+    elective_groupings <- unique(cohort_12$elective_icd)
+    print(elective_groupings)
     
-      
-      
-      
+    for(k in 1:length(elective_groupings)){
+    
+      base_dir <- "./"
       current_icd <- elective_groupings[k]
-    cohort12_icd <- cohort12[cohort12$elective_icd == current_icd,]
-    cohort1_icd <- cohort1[cohort1$ICD == current_icd,]
-    
-    failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
-    failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
-    
-    ## try catch for survival analysis 
-    ## failure function 
-    
-    
-    cohort12_failure_func <- failure_func_try(cohort23 =  cohort12_icd,
-                                              csv_survival_name = failure_csv,
-                                              pdf_to_export = failure_pdf, current_ICD = current_icd)   
-    
-    if(length(cohort12_failure_func) != 0){
-      failure_res <- rbind.data.frame(failure_res, cohort12_failure_func[[2]])
+      cohort12_icd <- cohort_12[cohort_12$elective_icd == current_icd,]
+      
+      failure_csv <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".csv", sep = "")
+      failure_pdf <- paste(base_dir, "./surival_cohort_12_ICD",current_icd,".pdf", sep = "")
+      
+      ## try catch for survival analysis 
+      ## failure function 
+      
+      
+      cohort12_failure_func <- failure_func_try(cohort23 =  cohort12_icd,
+                                                csv_survival_name = failure_csv,
+                                                pdf_to_export = failure_pdf, current_ICD = current_icd)   
+      
+      if(length(cohort12_failure_func) != 0){
+        failure_df <- rbind.data.frame(failure_df, cohort12_failure_func[[2]])
+      }
     }
-    
     
     
   }
@@ -2673,7 +2691,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     patient_groups_to_run <- paste(icds_to_run,"ga",ages_to_run, sep = "-")
     patient_groups_to_run_cc <- paste(icds_to_run,"cc",ages_to_run, sep = "-")
     tot_patient_groups <- c(patient_groups_to_run, patient_groups_to_run_cc)
-    browser()
+    
     tic("Setting up elective cluster")
     regression_cluster <- snow::makeCluster(spec = 14, outfile = "./crr_cluster_log.txt")
     
@@ -2691,7 +2709,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     snow::clusterExport(regression_cluster, "month_trend", envir = environment())
     snow::clusterExport(regression_cluster, "wt_variable", envir = environment())
     snow::clusterExport(regression_cluster, "week_num", envir = environment())
-    
+    snow::clusterExport(regression_cluster, "half_week", envir = environment())
     copy_end <- Sys.time()
     print(copy_end - copy_start)
     snow::clusterEvalQ(regression_cluster, require(dplyr))
@@ -2711,7 +2729,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
                                             start_date = start_date, time_trend = time_trend,
                                             month_trend = month_trend,
                                             wt_variable = wt_variable,
-                                            week_num = week_num)
+                                            week_num = week_num,
+                                            half_week = half_week)
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
     snow::clusterEvalQ(regression_cluster, rm(hes_data))
@@ -2728,7 +2747,9 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
       
     }
     
-    actual_out_df <- NULL
+    if(half_week){
+      week_num <- seq(0.5,length.out = length(week_num), by = 1)
+    }
     
     for(j in week_num){
       current_whole_graph_df <- whole_graph_df[whole_graph_df$week == j,]
@@ -2774,6 +2795,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     snow::clusterExport(regression_cluster, "month_trend", envir = environment())
     snow::clusterExport(regression_cluster, "week_num", envir = environment())
     snow::clusterExport(regression_cluster, "wt_variable", envir = environment())
+    snow::clusterExport(regression_cluster, "half_week", envir = environment())
     copy_end <- Sys.time()
     print(copy_end - copy_start)
     snow::clusterEvalQ(regression_cluster, require(dplyr))
@@ -2792,7 +2814,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
                                                    forecast_length = forecast_length, forecast_start = forecast_start,
                                                    start_date = start_date, time_trend = time_trend,
                                                    month_trend = month_trend,
-                                                   week_num = week_num)
+                                                   week_num = week_num,
+                                                   half_week = half_week)
     jobs_end <- Sys.time()
     print(jobs_end - jobs_start)
     snow::clusterEvalQ(regression_cluster, rm(hes_data))
@@ -2803,6 +2826,10 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     whole_graph_df <- dplyr::bind_rows(regression_jobs_parallel)
     
     actual_out_df <- NULL
+    if(half_week){
+      week_num <- seq(0.5,length.out = length(week_num), by = 1)
+    }
+    
     
     for(j in week_num){
       current_whole_graph_df <- whole_graph_df[whole_graph_df$week == j,]
@@ -2815,7 +2842,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
   }
   
   toc()  
-  return(list(actual_out_df, coefdf_tot))  
+  return(list(actual_out_df, coefdf_tot, failure_df))   
   
   
   
@@ -3200,8 +3227,8 @@ failure_function <- function(cohort23, csv_survial_name,
 
 
 reg_data_summariser <- function(reg_data,admi_type, week_num){
-  
 
+  
   icds_in_play <- unique(reg_data[reg_data$WT == "mean","ICD"])
   if(length(which(is.na(icds_in_play))) > 0)
     icds_in_play <- icds_in_play[-which(is.na(icds_in_play))]
