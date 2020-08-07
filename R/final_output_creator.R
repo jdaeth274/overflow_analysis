@@ -13,7 +13,8 @@ no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
   
   covid_no_cc <- covid_no_cc[covid_no_cc$s == "G",]
   covid_cc_ga <- covid_cc[covid_cc$s == "G",]
-  
+  current_week <- covid_cc_ga$week[1]
+  print(covid_cc_ga$week[1])
   transform_vec <- rep(0, 12)
   out_df <- NULL
   
@@ -34,18 +35,34 @@ no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
       transform_vec[current_rows][zero_rows] <- 0
        
       if(length(zero_rows) != 4){
+       
+       
        non_zero_rows_cc <- current_age_cc_dat[-zero_rows,]
        non_zero_rows_no <- current_age_no_cc[-zero_rows,]
+       death_row <- which(non_zero_rows_cc$sbar == "D")
+       non_3 <- FALSE
+       if(length(death_row) != 1){
+         death_row <- 1
+         non_3 <- TRUE
+       } 
+       
+       if(nrow(non_zero_rows_no) != 3){
+         non_3 <- TRUE
+       }
+       
        
        non_zero_rows_cc$pi_y <- non_zero_rows_cc$pi_y / sum(non_zero_rows_cc$pi_y)
        non_zero_rows_no$pi_y <- non_zero_rows_no$pi_y / sum(non_zero_rows_no$pi_y)
        
-       alpha_val <- (non_zero_rows_no$pi_y[1] / non_zero_rows_cc$pi_y[1]) - 1
-       beta_val <- (((1 + alpha_val)*non_zero_rows_cc$pi_y[1]) + (1 - non_zero_rows_cc$pi_y[1]) - 1) / (1 - non_zero_rows_cc$pi_y[1])
        
-       transform_vec[current_rows][-zero_rows] <- c(1+alpha_val, rep((1- beta_val),(4-length(zero_rows) - 1)))
+       alpha_val <- (non_zero_rows_no$pi_y[death_row] / non_zero_rows_cc$pi_y[death_row]) - 1
+       beta_val <- (((1 + alpha_val)*non_zero_rows_cc$pi_y[death_row]) + (1 - non_zero_rows_cc$pi_y[death_row]) - 1) / (1 - non_zero_rows_cc$pi_y[death_row])
        
-       
+       if(non_3){
+        transform_vec[current_rows][-zero_rows] <- c(1+alpha_val, rep((1- beta_val),(4-length(zero_rows) - 1)))
+       }else{
+        transform_vec[current_rows][-zero_rows] <- c(1 - beta_val, 1+alpha_val, 1- beta_val)
+       }
       }
       
       
@@ -55,7 +72,6 @@ no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
     
     
   }
-  
   
   
   icds_to_work_through <- nrow(icd_current_week_ga) / 12
@@ -68,7 +84,7 @@ no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
   
   for(k in 1:icds_to_work_through){
     new_df <- NULL
-    print(k)
+    
     current_rows <- seq((k * 12) -11,k * 12)
     current_dat_full <- icd_current_week_ga[current_rows,]
     current_dat <- current_dat_full$pi_y
@@ -80,6 +96,8 @@ no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
       current_transform <- transform_vec[current_age_rows]
       current_no_cc <- covid_no_cc[current_age_rows,"pi_y"]
       
+      
+      
       if(sum(current_4) != 0){
         if(1 %in% current_no_cc){
           new_pi_y[current_age_rows] <- current_no_cc
@@ -87,15 +105,17 @@ no_cc_probs <- function(covid_no_cc, icd_current_week_ga, covid_cc){
           current_4[c(1,3,4)] <- current_4[c(1,3,4)] / sum(current_4[c(1,3,4)])
           transformed_4 <- current_4 * transform_vec[current_age_rows]
           trans_diff <- transformed_4[c(1,3,4)] - current_4[c(1,3,4)]
-          lhs_diff <- abs(trans_diff[1])
-          rhs_diff <- abs(sum(trans_diff[2:3]))
+          lhs_diff <- abs(sum(trans_diff[c(1,3)]))
+          rhs_diff <- abs(trans_diff[2])
           
           if(lhs_diff > rhs_diff){
-            new_diff <- trans_diff[1] / (lhs_diff / rhs_diff)
-            trans_diff[1] <- new_diff
+            new_diff <- trans_diff[c(1,3)] / (lhs_diff / rhs_diff)
+            trans_diff[c(1,3)] <- new_diff
+            
           }else if(rhs_diff > lhs_diff){
-            new_diff <- trans_diff[2:3] / (rhs_diff / lhs_diff)
-            trans_diff[2:3] <- new_diff
+            new_diff <- trans_diff[2] / (rhs_diff / lhs_diff)
+            trans_diff[2] <- new_diff
+            
           }
           
           transformed_4[c(1,3,4)] <- current_4[c(1,3,4)] + trans_diff

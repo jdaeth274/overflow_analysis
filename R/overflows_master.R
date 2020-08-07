@@ -95,7 +95,7 @@ time_series_data <- time_series_creator(hes_data = transitions_data, num_cores =
 times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data, train_date = as.Date(forecast_start_date),
                                        forecast_period = 52,  base_dir = "./",
                                        run_admis = TRUE, forecast_admis = TRUE, forecast_WT = TRUE, forecast_frail = TRUE,
-                                       cut_off_dates = cutoff_dates)
+                                       cutoff_dates = cutoff_dates)
 
 ## costs ##
 
@@ -105,8 +105,11 @@ costs_res <- costs_function(transitions_data, costs_directory = costs_dir, FY = 
 ## Sum up file 
 covid_csv <- read.csv(file = covid_csv_loc,
                       stringsAsFactors = FALSE)
-covid_probs <- read.csv(file = covid_probs_loc,
+covid_probs <- read.csv(file = "D:/Dropbox/COVID19/Overflow/JOSH/6_8_data/Probabilities_covid_4_combined.csv",
                         stringsAsFactors = FALSE)
+covid_no_cc <- read.csv(file = "D:/Dropbox/COVID19/Overflow/JOSH/6_8_data/Probabilities_covid_requiredCC_combined.csv",
+                        stringsAsFactors = FALSE)
+
 
 pi_y_df <- sum_up_function(reg_res = regression_results , time_series_data_res = time_series_data,
                 time_series_forecasts = times_series_forecasts, forecast_length = 52, COVID_preds = covid_csv,

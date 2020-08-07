@@ -701,7 +701,7 @@ in_hosp_pool <- function(hes_data, forecast_date){
 
 time_series_creator <- function(hes_data, num_cores, forecast_date, emergency_run = TRUE,
                                 elective_res = TRUE, elective_ts = TRUE, waiting_pool = TRUE,
-                                forecast_cutoff){
+                                forecast_cutoff,in_hosp = TRUE){
   
   if(emergency_run){  
   emergency_ts <- running_emergencies_ts_in_parallel(hes_data, num_cores = num_cores)
@@ -723,8 +723,12 @@ time_series_creator <- function(hes_data, num_cores, forecast_date, emergency_ru
   print("Calculating bundle proportions")
 
   prop_bundle <- bundle_props(hes_data)
-  print("Calculating in hopsital pool")
-  in_hosp_pool_tot <- in_hosp_pool(hes_data, forecast_cutoff)
+  if(in_hosp){
+    print("Calculating in hopsital pool")
+    in_hosp_pool_tot <- in_hosp_pool(hes_data, forecast_cutoff)
+  }else{
+    in_hosp_pool_tot <- NULL
+  }
   elec_bundle <- prop_bundle[[1]]
   emerg_bundle <- prop_bundle[[2]]
   

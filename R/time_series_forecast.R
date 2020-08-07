@@ -206,12 +206,17 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             }
               
             if(diagnostics_only == FALSE){
+              ## altering here
               
-              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+              forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
+              tot_period <- floor(forecast_start_data_end) + forecast_period
+              forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), 'Admissions']
               if(length(pred_admi) < length(forecast_weeks))
                 pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
+              
               
               tot_dates <- c(Train$date, forecast_weeks)
               tot_ad <- c(Train$Admissions, pred_admi)
@@ -224,11 +229,11 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               
               
               
-              n<-forecast_period
+              n<-tot_period
               
               
               v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+              newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
                                  SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
               
               pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
@@ -302,15 +307,19 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                                  title_name = paste(d,age,ad) )
             }
             if(diagnostics_only == FALSE){
-              
-              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+              forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
+              tot_period <- floor(forecast_start_data_end) + forecast_period
+              forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), wait_time_col]
               if(length(pred_admi) < length(forecast_weeks))
-                pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+                pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
+              
               
               tot_dates <- c(Train$date, forecast_weeks)
               tot_ad <- c(Train[,wait_time_col], pred_admi)
+              
               df <- cbind.data.frame(tot_dates, tot_ad)
               colnames(df) <- c("date","Wait_time")
               df<-df[order(df$date),]
@@ -319,10 +328,11 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               
               
               
-              n<-forecast_period
+              n<-tot_period
+              
               
               v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,n)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+              newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
                                  SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
               
               pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
@@ -394,28 +404,32 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             }
             
             if(diagnostics_only == FALSE){
-              
-              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+              forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
+              tot_period <- floor(forecast_start_data_end) + forecast_period
+              forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
-              pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]
+              pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]#
               if(length(pred_admi) < length(forecast_weeks))
-                pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+                pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
+              
               
               tot_dates <- c(Train$date, forecast_weeks)
-              tot_ad <- c(Train[,"prop_Frail"], pred_admi)
-              df <- cbind.data.frame(tot_dates, tot_ad)
-              colnames(df) <- c("date","prop_Frail")
+              tot_ad <- c(Train[,"prop_Frail"], pred_admi)#
               
+              df <- cbind.data.frame(tot_dates, tot_ad)
+              colnames(df) <- c("date","prop_Frail")#
               df<-df[order(df$date),]
               df$signal<-NA
               df[df$date <= max(Train$date),'signal']<-Train$predicted
               
               
               
-              n<-forecast_period
+              n<-tot_period
+              
               
               v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+              newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
                                  SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
               
               pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
@@ -492,27 +506,32 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                 
                 if(diagnostics_only == FALSE){
                   
-                  forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+                  forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                      strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
+                  tot_period <- floor(forecast_start_data_end) + forecast_period
+                  forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
                   forecast_weeks <- forecast_weeks[-1]
-                  pred_admi <- temp[temp$date > max(Train$date), "prop_cc"]
+                  pred_admi <- temp[temp$date > max(Train$date), "prop_cc"]#
                   if(length(pred_admi) < length(forecast_weeks))
-                    pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+                    pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
+                  
                   
                   tot_dates <- c(Train$date, forecast_weeks)
-                  tot_ad <- c(Train[,"prop_cc"], pred_admi)
-                  df <- cbind.data.frame(tot_dates, tot_ad)
-                  colnames(df) <- c("date","prop_cc")
+                  tot_ad <- c(Train[,"prop_cc"], pred_admi)#
                   
+                  df <- cbind.data.frame(tot_dates, tot_ad)
+                  colnames(df) <- c("date","prop_cc")#
                   df<-df[order(df$date),]
                   df$signal<-NA
                   df[df$date <= max(Train$date),'signal']<-Train$predicted
                   
                   
                   
-                  n<-forecast_period
+                  n<-tot_period
+                  
                   
                   v<-var(residuals(out,type="response"))
-                  newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+                  newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
                                      SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
                   
                   pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
