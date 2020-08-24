@@ -210,7 +210,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               
               forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
                                                   strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-              tot_period <- floor(forecast_start_data_end) + forecast_period
+              tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
               forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), 'Admissions']
@@ -309,7 +309,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             if(diagnostics_only == FALSE){
               forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
                                                   strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-              tot_period <- floor(forecast_start_data_end) + forecast_period
+              tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
               forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), wait_time_col]
@@ -406,7 +406,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             if(diagnostics_only == FALSE){
               forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
                                                   strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-              tot_period <- floor(forecast_start_data_end) + forecast_period
+              tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
               forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]#
@@ -508,7 +508,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                   
                   forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
                                                       strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-                  tot_period <- floor(forecast_start_data_end) + forecast_period
+                  tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
                   forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
                   forecast_weeks <- forecast_weeks[-1]
                   pred_admi <- temp[temp$date > max(Train$date), "prop_cc"]#
@@ -587,12 +587,18 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                 start_week <- Train[which.max(Train$date),which(colnames(Train) == "admidate_week" | colnames(Train) == "rttstart_week")] + 1
                 end_week <- start_week - 1
                 
-                pred_data_vals <- mean_vals[start_week:52]
-                sd_data_vals <- sd_vals[start_week:52]
-                if(length(pred_data_vals) != 52){
-                  pred_data_vals <- c(pred_data_vals,mean_vals[1:end_week])
-                  sd_data_vals <- c(sd_data_vals,sd_vals[1:end_week])
+                week_seq <- start_week
+                while(length(week_seq) != forecast_period){
+                  next_week <- week_seq[length(week_seq)] + 1
+                  if(next_week == 53)
+                    next_week <- 1
+                  week_seq <- append(week_seq, next_week)
+                  
                 }
+                
+                
+                pred_data_vals <- mean_vals[week_seq]
+                sd_data_vals <- sd_vals[week_seq]
                 
                 patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
                 pred <- data.frame(matrix(ncol = 3, nrow = length(pred_dates), data = pred_data_vals))
@@ -627,6 +633,7 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
       ts_data$date <- as.Date(ts_data$date)
       ad <- "elective"
     }else if(admit_type == "Emergency"){
+
       ts_data$date<-as.POSIXct( paste( 1, ts_data$admidate_week, ts_data$admidate_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
       ts_data$date <- as.Date(ts_data$date)
       ad <- "emergency"
@@ -893,7 +900,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                                      forecast_period = forecast_period, cut_off_dates = cutoff_dates)
   print("Running electives pool, median wait and prop straight to cc")
   test_cohort_1_new_median <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_med_plot,
-                                         forecast_admissions = forecast_admis, forecast_frail = forecast_frail,
+                                         forecast_admissions = forecast_admis, forecast_frail = FALSE,
                                          forecast_wait = forecast_WT, forecast_cc = forecast_cc, cc_icd_ages = icd_ages_cc_cohort1,
                                          admit_type = "Elective", cohort3 = TRUE,
                                          wait_time_col = "p50_WT_ICDc", train_date = train_date,
@@ -901,7 +908,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                                          only_ICD = single_icd, cut_off_dates = cutoff_dates)
   print("Running electives mean wait and prop frail")
   test_cohort_1_new_mean <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_mean_plot,
-                                              forecast_admissions = forecast_admis, forecast_wait = forecast_WT, forecast_frail = forecast_frail,
+                                              forecast_admissions = FALSE, forecast_wait = forecast_WT, forecast_frail = TRUE,
                                          admit_type = "Elective", cohort3 = TRUE,
                                          wait_time_col = "mean_WT_ICDc", diagnostics_only = FALSE,
                                          train_date = train_date, only_ICD = single_icd,
@@ -953,6 +960,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
     cohort_1_median_wait <- forecast_clean(cohort_1_median_wait, cohort_num = 1, transformed = TRUE)
     cohort_1_mean_wait <- forecast_clean(cohort_1_mean_wait, cohort_num = 1, transformed = TRUE)
   }
+  ## FAILING HERE
   if(forecast_frail)
     cohort_1_frail <- forecast_clean(cohort_1_frail, cohort_num = 1, transformed_log = TRUE)
   if(forecast_cc)

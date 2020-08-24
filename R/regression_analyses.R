@@ -783,6 +783,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
         
       }else{
         ## remove na trans
+        hes_data <- hes_data[hes_data$cc_start_flg == 0,]
         tic("Removing NAs")
         na_rows <- which(is.na(hes_data$ga_transitions))
         if(length(na_rows) > 0)
@@ -1676,6 +1677,7 @@ elective_regression_cluster <- function(patient_group,hes_data_orig, start_date,
           seven_days$WaitingTime <- transformation(7)
           
           seven_wt_pred <- predict(ml_stay, newdata = seven_days, "probs")
+          
           if (!is.matrix(seven_wt_pred)){
             out_df <- matrix(data = 0,ncol = 4, nrow = forecast_length)
             colnames(out_df) <- levels(hes_data$outcome)
@@ -1772,6 +1774,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
     for(j in 1:length(patient_group)){
       print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
       tic(paste("Running for patient group:",patient_group[j]))
+      
       
 
       split_patient_group <- str_split_fixed(patient_group[j], "-",3)
@@ -1944,7 +1947,7 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
         
       }else{
         tic("Narrowing to GA only")
-        hes_data <- hes_data[hes_data$cc == 0,]
+        hes_data <- hes_data[hes_data$cc_start_flg == 0,]
         toc()
         ## remove na trans
         tic("Removing NAs")
@@ -2623,8 +2626,889 @@ emergency_regression_cluster <- function(patient_group,hes_data_orig, start_date
   
 }
 
+elective_regression2 <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
+                                 time_trend = TRUE, month_trend = TRUE, wt_variable = "linear",
+                                 week_num, half_week){
+  ## Function to creater mulitnomial logit on waiting time for transitions within hospital for patients
+  ## Works as a function in SNOW clustering.
+  ## Input: Patient group, strings in the form of ICD-ward-AGE (02-ga-1)
+  ##        hes_data_orig - transitions data frame narrowed form cluster set up function
+  ##        week_num - vector of weeks to calculate at 
+  ##        half_week - TRUE calculate values at 3.5 10.5 etc 
+  
 
-regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, forecast_start = "2012-03-05",
+  ## Set up the outdfs 
+  tic("Whole process")
+  tot_whole_df <- NULL
+  tot_coef_df <- NULL
+  index_df <- NULL
+  hes_data_orig$index <- seq(1,nrow(hes_data_orig),1)
+  require(stringr)
+  require(lubridate)  
+  require(reshape2)
+  require(tictoc)
+  
+  ## First loop through the week_numbers input 
+  
+  for(current_week in week_num){
+    whole_df <- data.frame(matrix(ncol = 8, nrow = length(patient_group)))
+    colnames(whole_df) <- c("GA","CC","Dead","Discharged","patient_group","ICD","age","WT")
+    coef_df <- NULL
+    if(half_week){
+      append_week <- (current_week + (current_week - 1)) /2 
+    }else{
+      append_week <- current_week
+    }
+    
+    ## For each week now loop through the patient groups 
+    for(j in 1:length(patient_group)){
+      
+      print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
+      tic(paste("Running for patient group:",patient_group[j]))
+      
+      ## Get the patient group charecteristics 
+      split_patient_group <- str_split_fixed(patient_group[j], "-",3)
+      current_icd <- as.integer(split_patient_group[1])
+      current_ward <- split_patient_group[2]
+      current_age <- as.integer(split_patient_group[3])
+      ## Narrow down the HES data
+      hes_data <- hes_data_orig[hes_data_orig$ICD == current_icd & 
+                                  hes_data_orig$agegrp_v3 == current_age,]
+      
+      if(current_ward == "cc"){
+        
+        tic("Narrowing to CC only")
+        hes_data <- hes_data[hes_data$cc == 1,]
+        toc()
+        ## remove na trans
+        tic("Removing NAs")
+        na_rows <- which(is.na(hes_data$cc_transitions))
+        if(length(na_rows) > 0)
+          hes_data <- hes_data[-na_rows,]
+        
+        na_cc_los <- which(is.na(hes_data$cc_LoS))
+        if(length(na_cc_los) > 0)
+          hes_data <- hes_data[-na_cc_los,]
+        
+        na_cc_WT <- which(is.na(hes_data$WaitingTime))
+        if(length(na_cc_WT) > 0)
+          hes_data <- hes_data[-na_cc_WT,]
+        
+        
+        toc()
+        
+        ## set up transitions 
+        tic("Set up outcome variable")
+        hes_data$outcome <- NA
+        
+        if(half_week){
+          ## To get the half day vals first look at 3 days 
+          ## First set up the sequence of days to draw from 
+          days_of_stay_variable <- seq(3,length.out = length(week_num), by = 7)
+          days_of_stay_variable <- c(-1,days_of_stay_variable)
+          ## Now we set an upper and lower initial bound ( -1 is to ensure continuity of the sequence)
+          ## upper is at day 3 10 etc, lower is at 0, 4, 11, upper is the half day so 3.5 
+          lower_end_stay <- days_of_stay_variable[current_week] + 1
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          half_day <- upper_end_stay
+          
+          half_dayers <- hes_data[hes_data$cc_LoS == half_day,]
+          if(nrow(half_dayers) >0){
+            ## If there is any LoS at half day then we look at randomly sampling 
+            ## half these to take as if they transitioned by midpoint of the day. 
+            adders <- sample(1:nrow(half_dayers),floor(nrow(half_dayers)/2), replace = F)
+            half_row_to_add <- half_dayers[adders,]
+            half_row_to_lose <- half_dayers[-adders,]
+            
+            ## Keep track of those lost so we can add them back in for the next week's 
+            ## values 
+            patient_group_indy <- rep(patient_group[j], nrow(half_row_to_lose))
+            indies <- half_row_to_lose$index
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+            
+          }else{
+            
+            half_row_to_add <- NULL
+            patient_group_indy <- patient_group[j]
+            indies <- 0
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+          }
+          
+          
+          ## go through the whole days first, set any above whole day cutoff as GA initially
+          
+          hes_data[hes_data$cc_LoS >= upper_end_stay ,"outcome"]<-"CC"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+          
+          if(!is.null(half_row_to_add)){
+            ## now we reallocate the half day values so the 3-3.5 values in
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+          }
+          
+          if(!is.null(index_df)){
+            ## now we check if previous runs left a half out and then add that in to this so the 3.5-4 runs 
+            patient_df <- index_df[index_df$patient_group == patient_group[j],]
+            if(nrow(patient_df) >0){
+              if(patient_df$index[1] != 0){
+                
+                
+                hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+                
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }else{
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }
+              
+              
+              
+              
+            }else{
+              
+              index_df <- dplyr::bind_rows(index_df, new_indies)
+            }
+            
+            
+          }else{
+            
+            index_df <- dplyr::bind_rows(index_df, new_indies)
+          }
+        }else{
+          ## Simpler for whole week values, just set the upper and lower bounds on the multiples of 7
+          
+          days_of_stay_variable <- seq(0, 42, 7)
+          lower_end_stay <- days_of_stay_variable[current_week]
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          
+          
+          hes_data[hes_data$cc_LoS >= upper_end_stay ,"outcome"]<-"CC"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+        }
+        if(length(which(is.na(hes_data$outcome))) > 0){
+          hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+        }
+        
+        if(nrow(hes_data) == 0){
+          ## If there is no data for this week of stay we just set the probabilities to 0
+          current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
+          colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
+          current_coef_df$transition <- c("CC","GA","Dead","Discharged")
+          current_coef_df$patient_group <- patient_group[j]
+          current_coef_df$ICD <- current_icd
+          current_coef_df$age <- current_age
+          
+          out_df <- as.data.frame(matrix(data = 0,ncol = 4, nrow = 1))
+          colnames(out_df) <- c("GA","Dead","CC","Discharged")
+          seven_wt_pred <- as.data.frame(out_df)
+          seven_wt_pred$patient_group <- patient_group[j]
+          seven_wt_pred$ICD <- current_icd
+          seven_wt_pred$age <- current_age
+          seven_wt_pred$WT <- "seven"
+          
+          seven_wt_pred <- seven_wt_pred %>% select(GA,CC,Dead,Discharged,patient_group,ICD,age,WT)
+          whole_df[j,] <- seven_wt_pred 
+          
+          
+          coef_df <- dplyr::bind_rows(coef_df, current_coef_df)
+          
+          next()
+          
+        }
+        
+        
+        
+        
+        
+        hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
+        hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
+        
+        
+        toc()
+        
+      }else{
+        ## remove na trans
+        hes_data <- hes_data[hes_data$cc_start_flg == 0,]
+        tic("Removing NAs")
+        na_rows <- which(is.na(hes_data$ga_transitions))
+        if(length(na_rows) > 0)
+          hes_data <- hes_data[-na_rows,]
+        
+        na_ga_los <- which(is.na(hes_data$GA_LoS))
+        if(length(na_ga_los) > 0)
+          hes_data <- hes_data[-na_ga_los,]
+        
+        na_ga_WT <- which(is.na(hes_data$WaitingTime))
+        if(length(na_ga_WT) > 0)
+          hes_data <- hes_data[-na_ga_WT,]
+        
+        
+        toc()
+        
+        ## set up transitions 
+        tic("Set up outcome variable")
+        hes_data$outcome <- NA
+        
+        if(half_week){
+          ## To get the half day vals first look at 3 days
+          ## Same methodology as above for CC patients 
+          
+          days_of_stay_variable <- seq(3,length.out = length(week_num), by = 7)
+          days_of_stay_variable <- c(-1,days_of_stay_variable)
+          lower_end_stay <- days_of_stay_variable[current_week] + 1
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          half_day <- upper_end_stay
+          
+          half_dayers <- hes_data[hes_data$GA_LoS == half_day,]
+          if(nrow(half_dayers) >0){
+            adders <- sample(1:nrow(half_dayers),floor(nrow(half_dayers)/2), replace = F)
+            half_row_to_add <- half_dayers[adders,]
+            half_row_to_lose <- half_dayers[-adders,]
+            
+            patient_group_indy <- rep(patient_group[j], nrow(half_row_to_lose))
+            indies <- half_row_to_lose$index
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+            
+          }else{
+            
+            half_row_to_add <- NULL
+            patient_group_indy <- patient_group[j]
+            indies <- 0
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+          }
+          
+          
+          ## go through the whole days first, set any above whole day cutoff as GA initially
+          
+          hes_data[hes_data$GA_LoS >= upper_end_stay ,"outcome"]<-"GA"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+          
+          if(!is.null(half_row_to_add)){
+            ## now we reallocate the half day values so the 3-3.5 values in
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+          }
+          
+          if(!is.null(index_df)){
+            ## now we check if previous runs left a half out and then add that in to this so the 3.5-4 runs 
+            patient_df <- index_df[index_df$patient_group == patient_group[j],]
+            if(nrow(patient_df) >0){
+              if(patient_df$index[1] != 0){
+                hes_data[hes_data$index %in% patient_df$index & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+                
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }else{
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }
+              
+            }else{
+              
+              index_df <- dplyr::bind_rows(index_df, new_indies)
+            }
+            
+            
+          }else{
+            
+            index_df <- dplyr::bind_rows(index_df, new_indies)
+          }
+          
+          
+          
+          
+        }else{
+          
+          
+          days_of_stay_variable <- seq(0, 42, 7)
+          lower_end_stay <- days_of_stay_variable[current_week]
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          
+          
+          hes_data[hes_data$GA_LoS >= upper_end_stay ,"outcome"]<-"GA"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+        }
+        if(length(which(is.na(hes_data$outcome))) > 0)
+          hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+        
+        if(nrow(hes_data) == 0){
+          current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
+          colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
+          current_coef_df$transition <- c("CC","GA","Dead","Discharged")
+          current_coef_df$patient_group <- patient_group[j]
+          current_coef_df$ICD <- current_icd
+          current_coef_df$age <- current_age
+          
+          out_df <- as.data.frame(matrix(data = 0,ncol = 4, nrow = 1))
+          colnames(out_df) <- c("GA","Dead","CC","Discharged")
+          seven_wt_pred <- as.data.frame(out_df)
+          seven_wt_pred$patient_group <- patient_group[j]
+          seven_wt_pred$ICD <- current_icd
+          seven_wt_pred$age <- current_age
+          seven_wt_pred$WT <- "seven"
+          
+          seven_wt_pred <- seven_wt_pred %>% select(GA,CC,Dead,Discharged,patient_group,ICD,age,WT)
+          whole_df[j,] <- seven_wt_pred 
+          
+          coef_df <- dplyr::bind_rows(coef_df, current_coef_df)
+          
+          next()
+          
+        }
+        
+        hes_data$outcome <- factor(hes_data$outcome, levels = c("CC","Dead","GA","Discharged"))
+        hes_data$outcome <- relevel(hes_data$outcome, ref = "GA")
+        
+      }
+        
+      toc()
+      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome","WaitingTime"))]
+      
+      outcomes_in_dat <- plyr::count(reg_data_no_stay$outcome)
+      if(nrow(outcomes_in_dat) < 2){
+        
+        ## Need at least two separate outcomes to fit the model 
+        ## If only 1 set the transitions as one for that outcome 
+        
+        out_df <- as.data.frame(matrix(data = 0,ncol = 4, nrow = 1))
+        colnames(out_df) <- c("GA","CC","Dead","Discharged")
+        out_df[,as.character(outcomes_in_dat[1,1])] <- 1
+        mean_wt_pred <- as.data.frame(out_df)
+        mean_wt_pred$patient_group <- patient_group[j]
+        mean_wt_pred$ICD <- current_icd
+        mean_wt_pred$age <- current_age
+        mean_wt_pred$WT <- "seven"
+        
+        current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
+        colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
+        current_coef_df$transition <- c("CC","GA","Dead","Discharged")
+        current_coef_df$patient_group <- patient_group[j]
+        current_coef_df$ICD <- current_icd
+        current_coef_df$age <- current_age
+        
+        
+        
+      }else{
+        # ml depending on WT only
+        
+        tic("Regreesion model fitting")
+        ml_stay <- multinom(outcome ~ ., data = reg_data_no_stay)
+        
+        ## Create the coefs by looking at a one day increase in Waiting time and how that affects
+        ## outcomes 
+        
+        wt_0_dat <- as.data.frame(matrix(0, ncol = ncol(reg_data_no_stay) - 1, nrow = 1))
+        colnames(wt_0_dat) <- colnames(reg_data_no_stay)[-which(colnames(reg_data_no_stay) == "outcome")]
+        wt_1_dat <- wt_0_dat
+        wt_1_dat$WaitingTime <- 1
+        
+        wt_0_pred <- predict(ml_stay, newdata = wt_0_dat, "probs")
+        wt_1_pred <- predict(ml_stay, newdata = wt_1_dat, "probs")
+        
+        wt_diff <- wt_1_pred - wt_0_pred
+        
+        if(length(wt_diff) != 4){
+          if(length(wt_diff) == 1){
+            current_lev <- ml_stay$lev[1]
+            other_lev <- ml_stay$lev[2]
+            wt_diff <- c(wt_diff, ((1- wt_1_pred) - (1- wt_0_pred)))
+            names(wt_diff) <- c(current_lev, other_lev)
+          }
+          missing_factors <- which(!(levels(reg_data_no_stay$outcome) %in% names(wt_diff)))
+          old_names <- names(wt_diff)
+          wt_diff <- append(wt_diff,rep(0, length(missing_factors)))
+          names(wt_diff) <- c(old_names, levels(reg_data_no_stay$outcome)[missing_factors])
+          
+        }
+        current_coef_df <- data.frame(matrix(0, ncol = 5, nrow = 4))
+        colnames(current_coef_df) <- c("transition","coef","patient_group","ICD","age")
+        current_coef_df$transition <- names(wt_diff)
+        current_coef_df$coef <- wt_diff
+        current_coef_df$patient_group <- patient_group[j]
+        current_coef_df$ICD <- current_icd
+        current_coef_df$age <- current_age
+        
+        
+        toc()
+        
+        
+        tic("Probability creation")
+        ## Create one row df of Waiting time at 7 days for the transitions probabilities 
+        means <- as.data.frame(matrix(data = 0,ncol = ncol(reg_data_no_stay) - 1, nrow = 1))
+          
+        ## make the actual data df to compare to predictions 
+        means$WaitingTime <- 7
+        ## Now predict 
+          
+        mean_wt_pred <- predict(ml_stay, newdata = means, "probs")
+        ## Now go through outcomes to ensure that prediction returns values for all transitions
+        ## If two outcomes probably won't be a matirx 
+        print("Done the predicting")
+        if(length(mean_wt_pred) == 1){
+          print("In length 1")
+          
+          out_df <- matrix(data = 0,ncol = 4, nrow = 1)
+          colnames(out_df) <- c("GA","CC","Dead","Discharged")
+          single_val <- mean_wt_pred
+          max_count <- which.is.max(outcomes_in_dat[,2])
+          if(single_val > 0.5){
+            out_df[,outcomes_in_dat[max_count, 1]] <- mean_wt_pred
+            out_df[,outcomes_in_dat[-max_count,1]] <- 1 - mean_wt_pred
+          }else{
+            out_df[,outcomes_in_dat[max_count, 1]] <- 1 - mean_wt_pred
+            out_df[,outcomes_in_dat[-max_count,1]] <- mean_wt_pred
+          }
+            
+          mean_wt_pred <- out_df
+        }else if(length(mean_wt_pred) > 1 ){
+          print("In the length > 1 section")
+          out_df <- matrix(data = 0,ncol = 4, nrow = 1)
+          colnames(out_df) <- levels(hes_data$outcome)
+          for(column in names(mean_wt_pred)){
+            out_df[,column] <- mean_wt_pred[column]
+          
+            }
+            
+            mean_wt_pred <- out_df
+          }
+          
+          mean_wt_pred <- as.data.frame(mean_wt_pred)
+          mean_wt_pred$patient_group <- patient_group[j]
+          mean_wt_pred$ICD <- current_icd
+          mean_wt_pred$age <- current_age
+          mean_wt_pred$WT <- "seven"
+                    
+          toc()
+          
+          
+      }
+      
+      
+      
+      mean_wt_pred <- mean_wt_pred %>% select(GA,CC,Dead,Discharged,patient_group,ICD,age,WT)
+      whole_df[j,] <- mean_wt_pred 
+      coef_df <- dplyr::bind_rows(coef_df, current_coef_df)
+      
+      }
+      
+      
+      toc()
+      whole_df$week <- append_week
+      coef_df$week <- append_week
+      
+      tot_whole_df <- dplyr::bind_rows(tot_whole_df, whole_df)
+      tot_coef_df <- dplyr::bind_rows(tot_coef_df, coef_df)
+    }
+  
+    
+    
+    return(list(tot_whole_df, tot_coef_df))
+    
+}
+      
+emergency_regression2 <- function(patient_group,hes_data_orig, start_date, forecast_length, forecast_start,
+                                 time_trend = TRUE, month_trend = TRUE, wt_variable = "linear",
+                                 week_num, half_week){
+  ## Function to get mean proportions for transitions within hospital for patients as Electives
+  ## Works as a function in SNOW clustering.
+  ## Input: Patient group, strings in the form of ICD-ward-AGE (02-ga-1)
+  ##        hes_data_orig - transitions data frame narrowed form cluster set up function
+  ##        week_num - vector of weeks to calculate at 
+  ##        half_week - TRUE calculate values at 3.5 10.5 etc 
+  
+
+  ## Set up the outdfs 
+  tic("Whole process")
+  tot_whole_df <- NULL
+  tot_coef_df <- NULL
+  index_df <- NULL
+  hes_data_orig$index <- seq(1,nrow(hes_data_orig),1)
+  require(stringr)
+  require(lubridate)  
+  require(reshape2)
+  require(tictoc)
+  
+  ## First loop through the week_numbers input 
+  
+  for(current_week in week_num){
+    whole_df <- data.frame(matrix(ncol = 8, nrow = length(patient_group)))
+    colnames(whole_df) <- c("GA","CC","Dead","Discharged","patient_group","ICD","age","WT")
+    if(half_week){
+      append_week <- (current_week + (current_week - 1)) /2 
+    }else{
+      append_week <- current_week
+    }
+    
+    ## For each week now loop through the patient groups 
+    for(j in 1:length(patient_group)){
+      
+      print(paste("On patient group:",patient_group[j],". Number",j, "of",length(patient_group)))
+      tic(paste("Running for patient group:",patient_group[j]))
+      
+      ## Get the patient group charecteristics 
+      split_patient_group <- str_split_fixed(patient_group[j], "-",3)
+      current_icd <- as.integer(split_patient_group[1])
+      current_ward <- split_patient_group[2]
+      current_age <- as.integer(split_patient_group[3])
+      ## Narrow down the HES data
+      hes_data <- hes_data_orig[hes_data_orig$ICD == current_icd & 
+                                  hes_data_orig$agegrp_v3 == current_age,]
+      
+      if(current_ward == "cc"){
+        
+        tic("Narrowing to CC only")
+        hes_data <- hes_data[hes_data$cc == 1,]
+        toc()
+        ## remove na trans
+        tic("Removing NAs")
+        na_rows <- which(is.na(hes_data$cc_transitions))
+        if(length(na_rows) > 0)
+          hes_data <- hes_data[-na_rows,]
+        
+        na_cc_los <- which(is.na(hes_data$cc_LoS))
+        if(length(na_cc_los) > 0)
+          hes_data <- hes_data[-na_cc_los,]
+        
+        na_cc_WT <- which(is.na(hes_data$WaitingTime))
+        if(length(na_cc_WT) > 0)
+          hes_data <- hes_data[-na_cc_WT,]
+        
+        
+        toc()
+        
+        ## set up transitions 
+        tic("Set up outcome variable")
+        hes_data$outcome <- NA
+        
+        if(half_week){
+          ## To get the half day vals first look at 3 days 
+          ## First set up the sequence of days to draw from 
+          days_of_stay_variable <- seq(3,length.out = length(week_num), by = 7)
+          days_of_stay_variable <- c(-1,days_of_stay_variable)
+          ## Now we set an upper and lower initial bound ( -1 is to ensure continuity of the sequence)
+          ## upper is at day 3 10 etc, lower is at 0, 4, 11, upper is the half day so 3.5 
+          lower_end_stay <- days_of_stay_variable[current_week] + 1
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          half_day <- upper_end_stay
+          
+          half_dayers <- hes_data[hes_data$cc_LoS == half_day,]
+          if(nrow(half_dayers) >0){
+            ## If there is any LoS at half day then we look at randomly sampling 
+            ## half these to take as if they transitioned by midpoint of the day. 
+            adders <- sample(1:nrow(half_dayers),floor(nrow(half_dayers)/2), replace = F)
+            half_row_to_add <- half_dayers[adders,]
+            half_row_to_lose <- half_dayers[-adders,]
+            
+            ## Keep track of those lost so we can add them back in for the next week's 
+            ## values 
+            patient_group_indy <- rep(patient_group[j], nrow(half_row_to_lose))
+            indies <- half_row_to_lose$index
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+            
+          }else{
+            
+            half_row_to_add <- NULL
+            patient_group_indy <- patient_group[j]
+            indies <- 0
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+          }
+          
+          
+          ## go through the whole days first, set any above whole day cutoff as GA initially
+          
+          hes_data[hes_data$cc_LoS >= upper_end_stay ,"outcome"]<-"CC"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+          
+          if(!is.null(half_row_to_add)){
+            ## now we reallocate the half day values so the 3-3.5 values in
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+          }
+          
+          if(!is.null(index_df)){
+            ## now we check if previous runs left a half out and then add that in to this so the 3.5-4 runs 
+            patient_df <- index_df[index_df$patient_group == patient_group[j],]
+            if(nrow(patient_df) >0){
+              if(patient_df$index[1] != 0){
+                
+                
+                hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+                
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }else{
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }
+              
+              
+              
+              
+            }else{
+              
+              index_df <- dplyr::bind_rows(index_df, new_indies)
+            }
+            
+            
+          }else{
+            
+            index_df <- dplyr::bind_rows(index_df, new_indies)
+          }
+        }else{
+          ## Simpler for whole week values, just set the upper and lower bounds on the multiples of 7
+          
+          days_of_stay_variable <- seq(0, 42, 7)
+          lower_end_stay <- days_of_stay_variable[current_week]
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          
+          
+          hes_data[hes_data$cc_LoS >= upper_end_stay ,"outcome"]<-"CC"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 2,"outcome"] <- "GA"
+          hes_data[hes_data$cc_LoS >= lower_end_stay & hes_data$cc_LoS < upper_end_stay & hes_data$cc_transitions == 1,"outcome"] <- "Discharged"
+        }
+        if(length(which(is.na(hes_data$outcome))) > 0){
+          hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+        }
+        
+        if(nrow(hes_data) == 0){
+          ## If there is no data for this week of stay we just set the probabilities to 0
+          out_df <- matrix(data = 0,ncol = 4, nrow = 1)
+          colnames(out_df) <- c("GA","Dead","CC","Discharged")
+          seven_wt_pred <- as.data.frame(out_df)
+          seven_wt_pred$patient_group <- patient_group[j]
+          seven_wt_pred$ICD <- current_icd
+          seven_wt_pred$age <- current_age
+          seven_wt_pred$WT <- "seven"
+          
+          seven_wt_pred <- seven_wt_pred %>% select(GA,CC,Dead,Discharged,patient_group,ICD,age,WT)
+          whole_df[j,] <- seven_wt_pred 
+          
+          
+          next()
+          
+        }
+        
+        toc()
+        
+      }else{
+        ## remove na trans
+        hes_data <- hes_data[hes_data$cc_start_flg == 0,]
+        tic("Removing NAs")
+        na_rows <- which(is.na(hes_data$ga_transitions))
+        if(length(na_rows) > 0)
+          hes_data <- hes_data[-na_rows,]
+        
+        na_ga_los <- which(is.na(hes_data$GA_LoS))
+        if(length(na_ga_los) > 0)
+          hes_data <- hes_data[-na_ga_los,]
+        
+        na_ga_WT <- which(is.na(hes_data$WaitingTime))
+        if(length(na_ga_WT) > 0)
+          hes_data <- hes_data[-na_ga_WT,]
+        
+        
+        toc()
+        
+        ## set up transitions 
+        tic("Set up outcome variable")
+        hes_data$outcome <- NA
+        
+        if(half_week){
+          ## To get the half day vals first look at 3 days
+          ## Same methodology as above for CC patients 
+          
+          days_of_stay_variable <- seq(3,length.out = length(week_num), by = 7)
+          days_of_stay_variable <- c(-1,days_of_stay_variable)
+          lower_end_stay <- days_of_stay_variable[current_week] + 1
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          half_day <- upper_end_stay
+          
+          half_dayers <- hes_data[hes_data$GA_LoS == half_day,]
+          if(nrow(half_dayers) >0){
+            adders <- sample(1:nrow(half_dayers),floor(nrow(half_dayers)/2), replace = F)
+            half_row_to_add <- half_dayers[adders,]
+            half_row_to_lose <- half_dayers[-adders,]
+            
+            patient_group_indy <- rep(patient_group[j], nrow(half_row_to_lose))
+            indies <- half_row_to_lose$index
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+            
+          }else{
+            
+            half_row_to_add <- NULL
+            patient_group_indy <- patient_group[j]
+            indies <- 0
+            new_indies <- cbind.data.frame(patient_group_indy, indies)
+            colnames(new_indies) <- c("patient_group","index")
+            
+          }
+          
+          
+          ## go through the whole days first, set any above whole day cutoff as GA initially
+          
+          hes_data[hes_data$GA_LoS >= upper_end_stay ,"outcome"]<-"GA"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+          
+          if(!is.null(half_row_to_add)){
+            ## now we reallocate the half day values so the 3-3.5 values in
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+            hes_data[hes_data$index %in% half_row_to_add$index & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+          }
+          
+          if(!is.null(index_df)){
+            ## now we check if previous runs left a half out and then add that in to this so the 3.5-4 runs 
+            patient_df <- index_df[index_df$patient_group == patient_group[j],]
+            if(nrow(patient_df) >0){
+              if(patient_df$index[1] != 0){
+                hes_data[hes_data$index %in% patient_df$index & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+                hes_data[hes_data$index %in% patient_df$index & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+                
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }else{
+                index_df <- index_df[-which(index_df$patient_group == patient_group[j]),]
+                index_df <- dplyr::bind_rows(index_df, new_indies)
+              }
+              
+            }else{
+              
+              index_df <- dplyr::bind_rows(index_df, new_indies)
+            }
+            
+            
+          }else{
+            
+            index_df <- dplyr::bind_rows(index_df, new_indies)
+          }
+          
+          
+          
+          
+        }else{
+          
+          
+          days_of_stay_variable <- seq(0, 42, 7)
+          lower_end_stay <- days_of_stay_variable[current_week]
+          upper_end_stay <- days_of_stay_variable[current_week + 1]
+          
+          
+          hes_data[hes_data$GA_LoS >= upper_end_stay ,"outcome"]<-"GA"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 3,"outcome"] <- "Dead"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 2,"outcome"] <- "CC"
+          hes_data[hes_data$GA_LoS >= lower_end_stay & hes_data$GA_LoS < upper_end_stay & hes_data$ga_transitions == 1,"outcome"] <- "Discharged"
+        }
+        if(length(which(is.na(hes_data$outcome))) > 0)
+          hes_data <- hes_data[-which(is.na(hes_data$outcome)),]
+        
+        if(nrow(hes_data) == 0){
+          out_df <- matrix(data = 0,ncol = 4, nrow = 1)
+          colnames(out_df) <- c("GA","Dead","CC","Discharged")
+          seven_wt_pred <- as.data.frame(out_df)
+          seven_wt_pred$patient_group <- patient_group[j]
+          seven_wt_pred$ICD <- current_icd
+          seven_wt_pred$age <- current_age
+          seven_wt_pred$WT <- "seven"
+          
+          seven_wt_pred <- seven_wt_pred %>% select(GA,CC,Dead,Discharged,patient_group,ICD,age,WT)
+          whole_df[j,] <- seven_wt_pred 
+          
+          
+          
+          next()
+          
+        }
+        
+        
+      }
+      
+      toc()
+      reg_data_no_stay <- hes_data[,which(colnames(hes_data) %in% c("outcome"))]
+      
+      
+      tic("Probability creation")
+      
+      mean_wt_pred <- as.data.frame(matrix(data = 0, nrow = 1, ncol = 4))
+      colnames(mean_wt_pred) <- c("GA","CC","Dead","Discharged")
+      denominator <- length(reg_data_no_stay)
+      GA_num <- length(reg_data_no_stay[reg_data_no_stay == "GA"])
+      cc_num <- length(reg_data_no_stay[reg_data_no_stay == "CC"])
+      dead_num <- length(reg_data_no_stay[reg_data_no_stay == "Dead"])
+      dis_num <- length(reg_data_no_stay[reg_data_no_stay == "Discharged"])
+        
+      mean_wt_pred$GA <- GA_num / denominator
+      mean_wt_pred$CC <- cc_num / denominator 
+      mean_wt_pred$Dead <- dead_num / denominator
+      mean_wt_pred$Discharged <- dis_num / denominator
+      mean_wt_pred$patient_group <- patient_group[j]
+      mean_wt_pred$ICD <- current_icd
+      mean_wt_pred$age <- current_age
+      mean_wt_pred$WT <- "seven"
+      mean_wt_pred <- mean_wt_pred %>% select(GA,CC,Dead,Discharged,patient_group,ICD,age,WT)
+        
+      toc()
+      
+      
+      whole_df[j,] <- mean_wt_pred 
+      
+    }
+    
+    
+    toc()
+    whole_df$week <- append_week
+    
+    tot_whole_df <- dplyr::bind_rows(tot_whole_df, whole_df)
+    
+  }
+  
+  
+  
+  return(tot_whole_df)
+  
+}
+
+
+
+
+regression_cluster_set_up <- function(patient_group, hes_data, forecast_length = 52, forecast_start = "2012-03-05",
                                       start_date = "2009-01-01", time_trend = TRUE, month_trend = TRUE, wt_variable = "linear",
                                       week_num = 1, failure_function_run = TRUE, half_week = TRUE){
 
@@ -2681,8 +3565,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     
     hes_data <- hes_data[hes_data$cohort == 1,]
     hes_data <- hes_data[,c("ICD","agegrp_v3","cc","WaitingTime","cc_LoS",
-                            "GA_LoS","ga_transitions","admidate_MDY","admidate_MM","admidate_YYYY",
-                            "admidate_week","cc_transitions")]
+                            "GA_LoS","ga_transitions","admidate_MDY","admidate_YYYY",
+                            "admidate_week","cc_transitions","cc_start_flg")]
     
     toc()
     icd_list <- unique(hes_data$ICD)
@@ -2691,23 +3575,14 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     patient_groups_to_run <- paste(icds_to_run,"ga",ages_to_run, sep = "-")
     patient_groups_to_run_cc <- paste(icds_to_run,"cc",ages_to_run, sep = "-")
     tot_patient_groups <- c(patient_groups_to_run, patient_groups_to_run_cc)
-    
     tic("Setting up elective cluster")
-    regression_cluster <- snow::makeCluster(spec = 14, outfile = "./crr_cluster_log.txt")
-    
+    regression_cluster <- snow::makeCluster(spec = 14, outfile = "./crr_cluster_log.txt", type = "SOCK")
     regression_input <- snow::clusterSplit(regression_cluster, tot_patient_groups)
     toc()
-    snow::clusterExport(regression_cluster, "elective_regression_cluster")
-    snow::clusterExport(regression_cluster, "week_num_func")
+    snow::clusterExport(regression_cluster, "elective_regression2")
     print(paste("Copying over data for ICD"))
     copy_start <- Sys.time()
     snow::clusterExport(regression_cluster, "hes_data", envir = environment())
-    snow::clusterExport(regression_cluster, "forecast_length", envir = environment())
-    snow::clusterExport(regression_cluster, "forecast_start", envir = environment())
-    snow::clusterExport(regression_cluster, "start_date", envir = environment())
-    snow::clusterExport(regression_cluster, "time_trend", envir = environment())
-    snow::clusterExport(regression_cluster, "month_trend", envir = environment())
-    snow::clusterExport(regression_cluster, "wt_variable", envir = environment())
     snow::clusterExport(regression_cluster, "week_num", envir = environment())
     snow::clusterExport(regression_cluster, "half_week", envir = environment())
     copy_end <- Sys.time()
@@ -2723,12 +3598,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     print(paste("Running Elective jobs for ICD"))
     jobs_start <- Sys.time()
     regression_jobs_parallel <- snow::clusterApply(regression_cluster, regression_input,
-                                            fun = elective_regression_cluster,
+                                            fun = elective_regression2,
                                             hes_data_orig = hes_data,
-                                            forecast_length = forecast_length, forecast_start = forecast_start,
-                                            start_date = start_date, time_trend = time_trend,
-                                            month_trend = month_trend,
-                                            wt_variable = wt_variable,
                                             week_num = week_num,
                                             half_week = half_week)
     jobs_end <- Sys.time()
@@ -2753,7 +3624,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     
     for(j in week_num){
       current_whole_graph_df <- whole_graph_df[whole_graph_df$week == j,]
-      current_out <- reg_data_summariser(current_whole_graph_df, admi_type = "N",week_num = j)
+      current_out <- reg_data_summariser2(current_whole_graph_df, admi_type = "N",week_num = j)
       
       actual_out_df <- dplyr::bind_rows(actual_out_df, current_out)
       
@@ -2762,11 +3633,11 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     
   }else if(patient_group == "emergency"){
     tic("Narrowing down the data")
-    hes_data <- hes_data[hes_data$cohort == 3,]
+    hes_data <- hes_data[hes_data$cohort != 1,]
     
     hes_data <- hes_data[,c("ICD","agegrp_v3","cc","cc_LoS",
-                            "GA_LoS","ga_transitions","admidate_MDY","admidate_MM","admidate_YYYY",
-                            "admidate_week","cc_transitions")]
+                            "GA_LoS","ga_transitions","admidate_MDY","admidate_YYYY",
+                            "admidate_week","cc_transitions", "cc_start_flg")]
     icd_list <- unique(hes_data$ICD)
     icds_to_run <- rep(icd_list, each = 3)
     ages_to_run <- rep(c(1,2,3),length(icd_list))
@@ -2776,24 +3647,17 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     icd_15_age_3_rm <- which(tot_patient_groups %in% c("15-ga-3","15-cc-3"))
     tot_patient_groups <- tot_patient_groups[-icd_15_age_3_rm]
     print(length(tot_patient_groups))
-
+    
     toc()
     tic("Setting up Emergency cluster")
-    regression_cluster <- snow::makeCluster(spec = 15, outfile = "./crr_cluster_log.txt")
+    regression_cluster <- snow::makeCluster(spec = 15, outfile = "./crr_cluster_log.txt", type = "SOCK")
     
     regression_input <- snow::clusterSplit(regression_cluster, tot_patient_groups)
     toc()
     snow::clusterExport(regression_cluster, "emergency_regression_cluster")
-    snow::clusterExport(regression_cluster, "week_num_func")
     print(paste("Copying over data for ICD"))
     copy_start <- Sys.time()
     snow::clusterExport(regression_cluster, "hes_data", envir = environment())
-    snow::clusterExport(regression_cluster, "forecast_length", envir = environment())
-    snow::clusterExport(regression_cluster, "forecast_start", envir = environment())
-    snow::clusterExport(regression_cluster, "start_date", envir = environment())
-    snow::clusterExport(regression_cluster, "time_trend", envir = environment())
-    snow::clusterExport(regression_cluster, "month_trend", envir = environment())
-    snow::clusterExport(regression_cluster, "week_num", envir = environment())
     snow::clusterExport(regression_cluster, "wt_variable", envir = environment())
     snow::clusterExport(regression_cluster, "half_week", envir = environment())
     copy_end <- Sys.time()
@@ -2809,11 +3673,8 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     print(paste("Running Emergency jobs for ICD"))
     jobs_start <- Sys.time()
     regression_jobs_parallel <- snow::clusterApply(regression_cluster, regression_input,
-                                                   fun = emergency_regression_cluster,
+                                                   fun = emergency_regression2,
                                                    hes_data_orig = hes_data,
-                                                   forecast_length = forecast_length, forecast_start = forecast_start,
-                                                   start_date = start_date, time_trend = time_trend,
-                                                   month_trend = month_trend,
                                                    week_num = week_num,
                                                    half_week = half_week)
     jobs_end <- Sys.time()
@@ -2833,7 +3694,7 @@ regression_cluster_set_up <- function(patient_group, hes_data, forecast_length, 
     
     for(j in week_num){
       current_whole_graph_df <- whole_graph_df[whole_graph_df$week == j,]
-      current_out <- reg_data_summariser(current_whole_graph_df, admi_type = "E",week_num = j)
+      current_out <- reg_data_summariser2(current_whole_graph_df, admi_type = "E",week_num = j)
       
       actual_out_df <- dplyr::bind_rows(actual_out_df, current_out)
       
@@ -3229,7 +4090,7 @@ failure_function <- function(cohort23, csv_survial_name,
 reg_data_summariser <- function(reg_data,admi_type, week_num){
 
   
-  icds_in_play <- unique(reg_data[reg_data$WT == "mean","ICD"])
+  icds_in_play <- unique(reg_data[reg_data$WT == "seven","ICD"])
   if(length(which(is.na(icds_in_play))) > 0)
     icds_in_play <- icds_in_play[-which(is.na(icds_in_play))]
     
@@ -3342,6 +4203,120 @@ reg_data_summariser <- function(reg_data,admi_type, week_num){
   return(out_df)
 }
 
+reg_data_summariser2 <- function(reg_data,admi_type, week_num){
+  
+  
+  icds_in_play <- unique(reg_data[reg_data$WT == "seven","ICD"])
+  if(length(which(is.na(icds_in_play))) > 0)
+    icds_in_play <- icds_in_play[-which(is.na(icds_in_play))]
+  
+  row_nums <- length(icds_in_play) * 8 * 3
+  
+  icd_names <- icds_in_play
+  for(k in 1:length(icd_names)){
+    if(nchar(icd_names[k]) == 1)
+      icd_names[k] <- paste("0",icd_names[k], sep = "")
+  }
+  
+  
+  
+  out_df <- data.frame(matrix(ncol = 7, nrow = row_nums))
+  colnames(out_df) <- c("a", "p",	"s",	"sbar",	"pi_y",	"coeff","variance")
+  out_df$a <- admi_type
+  out_df$p <- paste("ICD",rep(icd_names, each = 24),"_AGE",rep(rep(c(1,2,3),each = 8), length(icd_names)), sep = "")
+  out_df$s <- rep(rep(c("G","C"), each = 4), 3*length(icd_names))
+  out_df$sbar <- rep(c("H","C","D","G","H","G","D","C"), 3*length(icd_names))
+  
+  if(length(which(is.na(reg_data$WT))) > 0)
+    reg_data <- reg_data[-which(is.na(reg_data$WT))]
+  
+  if(admi_type == "N"){
+    icd_age_groups <- paste(rep(icds_in_play,each = 3),rep(c(1,2,3), length(icds_in_play)), sep = "-")
+    current_row_set <- 1
+    
+    
+    for(k in 1:length(icd_age_groups)){
+      current_icd <- as.integer(str_split_fixed(icd_age_groups[k],"-",2)[1])
+      current_age <- as.integer(str_split_fixed(icd_age_groups[k],"-",2)[2])
+      ga_grouping <- paste(current_icd,"ga",current_age,sep = "-")
+      cc_grouping <- paste(current_icd,"cc",current_age,sep = "-")
+      
+      current_df <- reg_data[reg_data$ICD == current_icd & reg_data$age == current_age, ]
+      current_df <- current_df[current_df$WT == "seven",]
+      if(length(which(is.na(current_df$ICD))) > 0)
+        current_df <- current_df[-which(is.na(current_df$ICD)),]
+      
+      ga_df <- current_df[current_df$patient_group == ga_grouping,]
+      cc_df <- current_df[current_df$patient_group == cc_grouping,]
+      
+      ga_ga <- ga_df[1,"GA"]
+      ga_cc <- ga_df[1,"CC"][1]
+      ga_dead <- ga_df[1,"Dead"][1]
+      ga_dis <- ga_df[1,"Discharged"][1]
+      ## cc
+      cc_ga <- cc_df[1,"GA"][1]
+      cc_cc <- cc_df[1,"CC"][1]
+      cc_dead <- cc_df[1,"Dead"][1]
+      cc_dis <- cc_df[1,"Discharged"][1]
+      
+      row_vals <- seq((current_row_set * 8) - 7,(current_row_set * 8))
+      
+      out_df$pi_y[row_vals] <- c(ga_dis, ga_cc, ga_dead, ga_ga,cc_dis, cc_ga, cc_dead, cc_cc) 
+      
+      print(out_df$p[row_vals[1]])
+      print(paste(current_icd, current_age,sep = "--"))
+      current_row_set <- current_row_set + 1
+      
+    }
+    
+    
+    
+    
+    
+  }else if(admi_type == "E"){
+    icd_age_groups <- paste(rep(icds_in_play,each = 3),rep(c(1,2,3), length(icds_in_play)), sep = "-")
+    current_row_set <- 1
+    
+    
+    for(k in 1:length(icd_age_groups)){
+      current_icd <- as.integer(str_split_fixed(icd_age_groups[k],"-",2)[1])
+      current_age <- as.integer(str_split_fixed(icd_age_groups[k],"-",2)[2])
+      ga_grouping <- paste(current_icd,"ga",current_age,sep = "-")
+      cc_grouping <- paste(current_icd,"cc",current_age,sep = "-")
+      
+      current_df <- reg_data[reg_data$ICD == current_icd & reg_data$age == current_age, ]
+      if(length(which(is.na(current_df$ICD))) > 0)
+        current_df <- current_df[-which(is.na(current_df$ICD)),]
+      
+      current_df <- current_df[current_df$WT == "mean",]
+      ga_df <- current_df[current_df$patient_group == ga_grouping,]
+      cc_df <- current_df[current_df$patient_group == cc_grouping,]
+      
+      ga_ga <- ga_df[1,"GA"]
+      ga_cc <- ga_df[1,"CC"][1]
+      ga_dead <- ga_df[1,"Dead"][1]
+      ga_dis <- ga_df[1,"Discharged"][1]
+      ## cc
+      cc_ga <- cc_df[1,"GA"][1]
+      cc_cc <- cc_df[1,"CC"][1]
+      cc_dead <- cc_df[1,"Dead"][1]
+      cc_dis <- cc_df[1,"Discharged"][1]
+      row_vals <- seq((current_row_set * 8) - 7,(current_row_set * 8))
+      
+      out_df$pi_y[row_vals] <- c(ga_dis, ga_cc, ga_dead, ga_ga,cc_dis, cc_ga, cc_dead, cc_cc) 
+      
+      print(out_df$p[row_vals[1]])
+      print(paste(current_icd, current_age,sep = "--"))
+      current_row_set <- current_row_set + 1
+      
+    }
+    
+    
+  }
+  
+  out_df$week <- week_num
+  return(out_df)
+}
 
 
 
