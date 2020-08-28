@@ -55,30 +55,6 @@ emergency_df_ts <- function(out_indies, Emergency_out_df, emergencies_only){
   ## Then creates the df for output and links back to the row_sumer function to 
   ## go through the df appending data
   
-  # emergencies_only <- emergencies_only[row_indies,]
-  # emergencies_only$week_year <- paste(as.character(emergencies_only$admidate_week),
-  #                                     as.character(emergencies_only$admidate_YYYY),
-  #                                     sep = "-")
-  # icds <- unique(emergencies_only$ICD)
-  # age_groupings <- unique(emergencies_only$agegrp_v3)
-  # week_year_combos <- unique(emergencies_only$week_year)
-  # num_weeks <- length(week_year_combos)
-  # num_icd <- length(icds)
-  # num_ages <- 3
-  # nrows_df <- num_weeks * num_ages * num_icd
-  # 
-  # emergency_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 6))
-  # colnames(emergency_out_Df) <- c("admidate_YYYY","admidate_week",
-  #                                 "Admissions","ICD","agegrp_v3",
-  #                                 "prop_Frail")
-  # weeks_year_split <- stringr::str_split_fixed(week_year_combos, "-",2)
-  # emergency_out_Df$admidate_YYYY <- rep(as.integer(weeks_year_split[,2]),(num_ages * num_icd))
-  # emergency_out_Df$admidate_week <- rep(as.integer(weeks_year_split[,1]),(num_ages * num_icd))
-  # emergency_out_Df$ICD <- rep(icds, each = num_weeks * num_ages)
-  # emergency_out_Df$agegrp_v3 <- rep(rep(age_groupings, each = num_weeks), num_icd)
-  # 
-  
-  
   emergency_out_Df <- lapply(X = out_indies, FUN = row_sumer,
                              out_row = Emergency_out_df,
                              hes_df = emergencies_only)
