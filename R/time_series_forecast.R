@@ -85,22 +85,27 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                               cohort3 = FALSE, train_date = "2012-01-01",
                               only_ICD = NULL,
                               forecast_period = 52, forecast_cc = FALSE,
-                              cc_icd_ages, cut_off_dates){
+                              cc_icd_ages, cutoff_dates){
   
   
-  # join the year and week variable to a date. Use UK  convention that week starts on a Monday.
+  # join the year and week variable to a date. 
   if(cohort3 == TRUE){
-    ts_data$date<-as.POSIXct( paste( 1, ts_data$rttstart_week, ts_data$rttstart_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
+    ts_data$date <- ISOweek::ISOweek2date(paste0(ts_data$rttstart_YYYY, "-W", 
+                                                 str_pad(ts_data$rttstart_week, width = 2, 
+                                                         side = "left", pad = "0"), "-1"))
     ts_data$date <- as.Date(ts_data$date)
     
   }else{
-    ts_data$date<-as.POSIXct( paste( 1, ts_data$admidate_week, ts_data$admidate_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
+    ts_data$date <- ISOweek::ISOweek2date(paste0(ts_data$epistart_YYYY, "-W", 
+                                                 str_pad(ts_data$epistart_week, width = 2, 
+                                                         side = "left", pad = "0"), "-1"))
     ts_data$date <- as.Date(ts_data$date)
   }
   ## remove date na rows ##
   na_dates <- which(is.na(ts_data$date))
-  if(length(na_dates) > 0)
+  if(length(na_dates) > 0){
     ts_data <- ts_data[-na_dates,]
+  }
   
   
   quad_y <- grep("YYYY", colnames(ts_data))
@@ -144,10 +149,11 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
   
 
   
-  if(length(only_ICD) > 0)
+  if(length(only_ICD) > 0){
     icds_to_look_at <- ts_data$ICD[grep(only_ICD,ts_data$ICD)[1]]
-  else
+  }else{
     icds_to_look_at <- unique(ts_data$ICD)
+  }
   
   for ( age in unique(ts_data$agegrp_v3)){
       for (d in icds_to_look_at){
@@ -159,11 +165,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                        ts_data$ICD==d,]
           temp <- temp[temp$date > as.Date(cutoff_dates[1]) &
                          temp$date < as.Date(cutoff_dates[2]) ,]
-          
-          if(cohort3 == TRUE){
-            
-          }
-          
+
           
           test<-sum(temp$Admissions>0)>10
           if (test){
@@ -172,10 +174,11 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             
             # large number of admissions
             # 
-            if(diagnostics_only == TRUE)
+            if(diagnostics_only == TRUE){
               Train<-temp[,c("date","Admissions")]
-            else
+            }else{
               Train<-temp[temp$date<as.Date(train_date),c("date","Admissions")]
+            }
             Train<-Train[order(Train$date),]
             a1 <- matrix(c(0,0),2, 1)
             P1 <- matrix(0, 2, 2)
@@ -210,9 +213,9 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), 'Admissions']
-              if(length(pred_admi) < length(forecast_weeks))
+              if(length(pred_admi) < length(forecast_weeks)){
                 pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
-              
+              }
               tot_dates <- c(Train$date, forecast_weeks)
               tot_ad <- c(Train$Admissions, pred_admi)
               
@@ -344,7 +347,9 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                 
               
               #b<-as.Date("2019-07-01")
-              print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted wait time")+geom_line()+
+              print(ggplot(data=df)+
+                      aes(x=date,y=fit, colour = "Predicted wait time")+
+                      geom_line()+
                       geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
                       geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
                                   linetype = 2, colour = NA) +
@@ -366,10 +371,11 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             
   
               
-            if(diagnostics_only == TRUE)
+            if(diagnostics_only == TRUE){
               Train<-temp[,c("date","prop_Frail")]
-            else
+            }else{
               Train<-temp[temp$date<as.Date(train_date),c("date","prop_Frail")]
+            }
             Train<-Train[order(Train$date),]
             a1 <- matrix(c(0,0),2, 1)
             P1 <- matrix(0, 2, 2)
@@ -398,9 +404,9 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
               pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]
-              if(length(pred_admi) < length(forecast_weeks))
+              if(length(pred_admi) < length(forecast_weeks)){
                 pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
-              
+              }
               tot_dates <- c(Train$date, forecast_weeks)
               tot_ad <- c(Train[,"prop_Frail"], pred_admi)
               df <- cbind.data.frame(tot_dates, tot_ad)
@@ -436,7 +442,9 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               
               
               #b<-as.Date("2019-07-01")
-              print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_prop_Frail")+geom_line()+
+              print(ggplot(data=df)+
+                      aes(x=date,y=fit, colour = "Predicted_prop_Frail")+
+                      geom_line()+
                       geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
                       geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
                                   colour = NA) +
@@ -463,10 +471,11 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                 
                 
                 
-                if(diagnostics_only == TRUE)
+                if(diagnostics_only == TRUE){
                   Train<-temp[,c("date","prop_cc")]
-                else
+                }else{
                   Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc")]
+                }
                 Train<-Train[order(Train$date),]
                 a1 <- matrix(c(0,0),2, 1)
                 P1 <- matrix(0, 2, 2)
@@ -604,11 +613,15 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
                               forecast_period = 52, cutoff_dates){
   
     if(admit_type == "Elective"){
-      ts_data$date<-as.POSIXct( paste( 1, ts_data$rttstart_week, ts_data$rttstart_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
+      ts_data$date <- ISOweek::ISOweek2date(paste0(ts_data$rttstart_YYYY, "-W", 
+                                                   str_pad(ts_data$rttstart_week, width = 2, 
+                                                           side = "left", pad = "0"), "-1")) 
       ts_data$date <- as.Date(ts_data$date)
       ad <- "elective"
     }else if(admit_type == "Emergency"){
-      ts_data$date<-as.POSIXct( paste( 1, ts_data$admidate_week, ts_data$admidate_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
+      ts_data$date <- ISOweek::ISOweek2date(paste0(ts_data$epistart_YYYY, "-W", 
+                                                   str_pad(ts_data$epistart_week, width = 2, 
+                                                           side = "left", pad = "0"), "-1"))
       ts_data$date <- as.Date(ts_data$date)
       ad <- "emergency"
     }
@@ -811,11 +824,11 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                               run_admis = TRUE, forecast_cc = TRUE, forecast_admis = TRUE, forecast_WT = TRUE,
                               forecast_frail = TRUE, cutoff_dates){
   #library(tidyverse)
-  library(ggplot2)
-  library(lubridate)
-  library(KFAS)
-  library(stringr)
-  library(forecast)
+  #library(ggplot2)
+  #library(lubridate)
+  #library(KFAS)
+  #library(stringr)
+  #library(forecast)
   
   cat("Starting forecasting runs")
   start_time <- Sys.time()
@@ -919,25 +932,31 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_1_cc <- test_cohort_1_new_median[[4]]
   
   
-  if(forecast_admis)
+  if(forecast_admis){
     cohort_3_admi <- forecast_clean(cohort_3_admi, cohort_num = 3)
-  if(forecast_frail)
+  }
+  if(forecast_frail){
     cohort_3_frail <- forecast_clean(cohort_3_frail, cohort_num = 3, transformed_log = TRUE)
-  if(forecast_cc)
+  }
+  if(forecast_cc){
     cohort_3_cc <- forecast_clean(cohort_3_cc, cohort_num = 3, transformed_log = TRUE)
+  }
   
   cohort_3_prop_bundle_forecast <- forecast_clean(cohort_3_prop_bundle_forecast, cohort_num = 3, transformed = TRUE)
   
-  if(forecast_admis)
+  if(forecast_admis){
     cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 1)
+  }
   if(forecast_WT){
     cohort_1_median_wait <- forecast_clean(cohort_1_median_wait, cohort_num = 1, transformed = TRUE)
     cohort_1_mean_wait <- forecast_clean(cohort_1_mean_wait, cohort_num = 1, transformed = TRUE)
   }
-  if(forecast_frail)
+  if(forecast_frail){
     cohort_1_frail <- forecast_clean(cohort_1_frail, cohort_num = 1, transformed_log = TRUE)
-  if(forecast_cc)
+  }
+  if(forecast_cc){
     cohort_1_cc <- forecast_clean(cohort_1_cc, cohort_num = 1, transformed_log = TRUE)
+  }
   cohort_1_prop_bundle_forecast <- forecast_clean(cohort_1_prop_bundle_forecast, cohort_num = 1, transformed = TRUE)
   
   cat("Done", "\n")
@@ -1054,121 +1073,3 @@ indiviudal_plot_function <- function(temp, ad, d, age){
   }
   
 }
-
-
-
-forecast_function_altered_grouping <- function(ts_data, results_name = "results_agg.pdf"){
-
-  ## Run this for all data, data by admit type, data by age, admit x age, admit x ICD
-  
-  # join the year and week variable to a date. Use UK  convention that week starts on a Monday.
-  ts_data$date<-as.POSIXct( paste( 1, ts_data$admidate_week, ts_data$admidate_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
-  
-#  pdf(file = results_name ,paper='A4')
-  
-  ## All ##
-
-  dates <- unique(ts_data$date)
-  new_ts_df <- data.frame(matrix(ncol = 3, nrow = length(dates)))
-  colnames(new_ts_df) <- c("date","Admissions","admidate_YYYY")
-  new_ts_df$date <- dates
-  
-  for(k in 1:nrow(new_ts_df)){
-    current_date_data <- ts_data[ts_data$date == new_ts_df$date[k],]
-    current_admissions <- sum(current_date_data$Admissions)
-    new_ts_df$Admissions[k] <- current_admissions
-    new_ts_df$admidate_YYYY[k] <- current_date_data$admidate_YYYY[1]
-    
-  }
-  
-  new_ts_df <- new_ts_df[new_ts_df$date > as.Date("2009-04-30"),]
-  indiviudal_plot_function(new_ts_df, "Emergency & Elective", "All ICDs","All Ages")
-  
-  ## Admit ##
-  
-  for(k in c("Emergency","Elective")){
-    new_ts_df <- data.frame(matrix(ncol = 3, nrow = length(dates)))
-    colnames(new_ts_df) <- c("date","Admissions","admidate_YYYY")
-    new_ts_df$date <- dates
-    
-    for(j in 1:nrow(new_ts_df)){
-      current_date_data <- ts_data[ts_data$date == new_ts_df$date[j] &
-                                   ts_data$admimeth_C== k,]
-      current_admissions <- sum(current_date_data$Admissions)
-      new_ts_df$Admissions[j] <- current_admissions
-      new_ts_df$admidate_YYYY[j] <- current_date_data$admidate_YYYY[1]
-      
-    }
-    new_ts_df <- new_ts_df[new_ts_df$date > as.Date("2009-04-30"),]
-    indiviudal_plot_function(new_ts_df, k, "All ICDs","All ages")
-  }
-  
-  ## Ages ##
-  
-  for(age in unique(ts_data$agegrp_v3)){
-    new_ts_df <- data.frame(matrix(ncol = 3, nrow = length(dates)))
-    colnames(new_ts_df) <- c("date","Admissions","admidate_YYYY")
-    new_ts_df$date <- dates
-    
-    for(j in 1:nrow(new_ts_df)){
-      current_date_data <- ts_data[ts_data$date == new_ts_df$date[j] &
-                                     ts_data$agegrp_v3== age,]
-      current_admissions <- sum(current_date_data$Admissions)
-      new_ts_df$Admissions[j] <- current_admissions
-      new_ts_df$admidate_YYYY[j] <- current_date_data$admidate_YYYY[1]
-      
-    }
-    new_ts_df <- new_ts_df[new_ts_df$date > as.Date("2009-04-30"),]
-    indiviudal_plot_function(new_ts_df, "Emergency & Elective", "All ICDs",age)
-  }
-  
-  ## Admissions by age ##
-  
-  for(k in c("Emergency","Elective")){
-    for(age in unique(ts_data$agegrp_v3)){
-      new_ts_df <- data.frame(matrix(ncol = 3, nrow = length(dates)))
-      colnames(new_ts_df) <- c("date","Admissions","admidate_YYYY")
-      new_ts_df$date <- dates
-      
-      for(j in 1:nrow(new_ts_df)){
-        current_date_data <- ts_data[ts_data$date == new_ts_df$date[j] &
-                                       ts_data$agegrp_v3== age &
-                                       ts_data$admimeth_C== k,]
-        current_admissions <- sum(current_date_data$Admissions)
-        new_ts_df$Admissions[j] <- current_admissions
-        new_ts_df$admidate_YYYY[j] <- current_date_data$admidate_YYYY[1]
-        
-      }
-      new_ts_df <- new_ts_df[new_ts_df$date > as.Date("2009-04-30"),]
-      indiviudal_plot_function(new_ts_df, k, "All ICDs",age)
-    }
-  }
-  
-  ## Admissions by ICD ##
-  
-  for (d in unique(ts_data$ICD)){
-    for(k in c("Emergency","Elective")){
-      new_ts_df <- data.frame(matrix(ncol = 3, nrow = length(dates)))
-      colnames(new_ts_df) <- c("date","Admissions","admidate_YYYY")
-      new_ts_df$date <- dates
-      
-      for(j in 1:nrow(new_ts_df)){
-        current_date_data <- ts_data[ts_data$date == new_ts_df$date[j] &
-                                       ts_data$ICD== d &
-                                       ts_data$admimeth_C== k,]
-        current_admissions <- sum(current_date_data$Admissions)
-        new_ts_df$Admissions[j] <- current_admissions
-        new_ts_df$admidate_YYYY[j] <- current_date_data$admidate_YYYY[1]
-        
-      }
-      new_ts_df <- new_ts_df[new_ts_df$date > as.Date("2009-04-30"),]
-      indiviudal_plot_function(new_ts_df, k, d,"All ages")
-    }}
-  
-  
-  
-  
-  dev.off()
-  
-}
-
