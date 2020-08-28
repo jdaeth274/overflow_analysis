@@ -145,7 +145,7 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
     
     print(paste("Setting up parallel job for ICD:", ICD))
     ## Create the cluster
-    cluster_function <- snow::makeCluster(spec = num_cores)
+    cluster_function <- snow::makeCluster(spec = num_cores, type = "SOCK")
     ## Split the rows for the separate cluster runs to loop over
     function_input <- snow::clusterSplit(cluster_function, hesid_rows)
     print(paste("Copying over functions for ICD:", ICD))
@@ -195,7 +195,7 @@ indiv_ICD_para <- function(ICD = "ONE", num_cores, hes_data){
     
     
     print(paste("Setting up parallel job for ICD:", ICD))
-    cluster_function <- snow::makeCluster(spec = num_cores, outfile = "D:/Overflows/cluster_log_file.txt")
+    cluster_function <- snow::makeCluster(spec = num_cores, outfile = "cluster_log_file.txt", type = "SOCK")
     function_input <- snow::clusterSplit(cluster_function, hesid_rows)
     print(paste("Copying over functions for ICD:", ICD))
     snow::clusterExport(cluster_function, "cohort_allocator")
@@ -264,9 +264,9 @@ cohort_set_up <- function(num_cores = 0, data_loc = "E:/HES/COVID/HES_APC_CC_091
   
   print("Loading up data")
   data_start <- Sys.time()
-  if(class(data_loc) == "character")
+  if(is.character(data_loc) == TRUE){
     data <- vroom(data_loc, delim = ",", num_threads = num_cores)
-  else{
+  }else{
     data <- data_loc
     rm(data_loc)
   }

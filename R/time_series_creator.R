@@ -28,8 +28,8 @@ row_sumer <- function(row_indy, out_row, hes_df){
   
   subset_hes <- hes_df[ hes_df$ICD == current_icd & 
                           hes_df$agegrp_v3 == current_age &
-                          hes_df$admidate_YYYY == current_year &
-                          hes_df$admidate_week == current_week, ]
+                          hes_df$epistart_YYYY == current_year &
+                          hes_df$epistart_week == current_week, ]
   return_row <- out_row[row_indy,]
   
   return_row$Admissions <- nrow(subset_hes)
@@ -55,30 +55,6 @@ emergency_df_ts <- function(out_indies, Emergency_out_df, emergencies_only){
   ## Then creates the df for output and links back to the row_sumer function to 
   ## go through the df appending data
   
-  # emergencies_only <- emergencies_only[row_indies,]
-  # emergencies_only$week_year <- paste(as.character(emergencies_only$admidate_week),
-  #                                     as.character(emergencies_only$admidate_YYYY),
-  #                                     sep = "-")
-  # icds <- unique(emergencies_only$ICD)
-  # age_groupings <- unique(emergencies_only$agegrp_v3)
-  # week_year_combos <- unique(emergencies_only$week_year)
-  # num_weeks <- length(week_year_combos)
-  # num_icd <- length(icds)
-  # num_ages <- 3
-  # nrows_df <- num_weeks * num_ages * num_icd
-  # 
-  # emergency_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 6))
-  # colnames(emergency_out_Df) <- c("admidate_YYYY","admidate_week",
-  #                                 "Admissions","ICD","agegrp_v3",
-  #                                 "prop_Frail")
-  # weeks_year_split <- stringr::str_split_fixed(week_year_combos, "-",2)
-  # emergency_out_Df$admidate_YYYY <- rep(as.integer(weeks_year_split[,2]),(num_ages * num_icd))
-  # emergency_out_Df$admidate_week <- rep(as.integer(weeks_year_split[,1]),(num_ages * num_icd))
-  # emergency_out_Df$ICD <- rep(icds, each = num_weeks * num_ages)
-  # emergency_out_Df$agegrp_v3 <- rep(rep(age_groupings, each = num_weeks), num_icd)
-  # 
-  
-  
   emergency_out_Df <- lapply(X = out_indies, FUN = row_sumer,
                              out_row = Emergency_out_df,
                              hes_df = emergencies_only)
@@ -98,13 +74,13 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   time_start <- Sys.time()
   emergencies_only <- hes_data[hes_data$cohort == 3,]
   
-  emergencies_cols <- which(colnames(emergencies_only) %in% c("admidate_week", "admidate_YYYY",
+  emergencies_cols <- which(colnames(emergencies_only) %in% c("epistart_week", "epistart_YYYY",
                                                          "Frail","ICD","agegrp_v3","cc"))
   emergencies_only <- emergencies_only[,emergencies_cols]
   
   
-  emergencies_only$week_year <- paste(as.character(emergencies_only$admidate_week),
-                                      as.character(emergencies_only$admidate_YYYY),
+  emergencies_only$week_year <- paste(as.character(emergencies_only$epistart_week),
+                                      as.character(emergencies_only$epistart_YYYY),
                                       sep = "-")
   icds <- unique(emergencies_only$ICD)
   age_groupings <- unique(emergencies_only$agegrp_v3)
@@ -115,12 +91,12 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   nrows_df <- num_weeks * num_ages * num_icd
   
   emergency_out_Df <- data.frame(matrix(nrow = nrows_df, ncol = 7))
-  colnames(emergency_out_Df) <- c("admidate_YYYY","admidate_week",
+  colnames(emergency_out_Df) <- c("epistart_YYYY","epistart_week",
                                   "Admissions","ICD","agegrp_v3",
                                   "prop_Frail","prop_cc")
   weeks_year_split <- stringr::str_split_fixed(week_year_combos, "-",2)
-  emergency_out_Df$admidate_YYYY <- rep(as.integer(weeks_year_split[,2]),(num_ages * num_icd))
-  emergency_out_Df$admidate_week <- rep(as.integer(weeks_year_split[,1]),(num_ages * num_icd))
+  emergency_out_Df$epistart_YYYY <- rep(as.integer(weeks_year_split[,2]),(num_ages * num_icd))
+  emergency_out_Df$epistart_week <- rep(as.integer(weeks_year_split[,1]),(num_ages * num_icd))
   emergency_out_Df$ICD <- rep(icds, each = num_weeks * num_ages)
   emergency_out_Df$agegrp_v3 <- rep(rep(age_groupings, each = num_weeks), num_icd)
   emergency_out_Df <- emergency_out_Df
@@ -129,7 +105,7 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   emergency_rows <- seq(1, nrows_df)
   tic("CLuster_Set_up")
   print("Setting up the parallel jobs")
-  cluster_function <- snow::makeCluster(spec = num_cores, outfile = "./ts_creat_log.txt")
+  cluster_function <- snow::makeCluster(spec = num_cores, outfile = "./ts_creat_log.txt", type = "SOCK")
   function_input <- snow::clusterSplit(cluster_function, emergency_rows)
   toc()
   tic("Function copy")
@@ -159,8 +135,10 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   stopCluster(cluster_function)
   
   emergency_data <- dplyr::bind_rows(emergency_data_parallel)
-  emergency_data$date <- as.POSIXct( paste( 1, emergency_data$admidate_week, emergency_data$admidate_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
-  
+  emergency_data$date <- ISOweek::ISOweek2date(paste0(emergency_data$epistart_YYYY, "-W", 
+                                                      str_pad(emergency_data$epistart_week, width = 2, 
+                                                              side = "left", pad = "0"), "-1")) 
+
   return(emergency_data)
   
 }
@@ -226,10 +204,10 @@ elective_df_ts <- function(out_indies, electives_only_Df, electives_only){
 
 make_wt_variable <- function(elective_df){
   
-  one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
+  one_year_under <- which(as.integer(elective_df$WaitingTime) <= 365)
   
   elective_df$WT <- NA
-  elective_df$WT[one_year_under] <- elective_df$elecdur[one_year_under]
+  elective_df$WT[one_year_under] <- elective_df$WaitingTime[one_year_under]
   
   return(elective_df)
   
@@ -339,10 +317,15 @@ waiting_pool <- function(current_icd, hes_data, end_date){
   
     age_1 <- current_hes[current_hes$agegrp_v3 == age &
                            current_hes$rttstart < end_date &
-                           current_hes$admidate_MDY >= end_date,]
+                           current_hes$epistart_MDY >= end_date,]
     out_df$pool[age] <- nrow(age_1)
     if(nrow(age_1) > 0){
       out_df$median_WT[age] <- median(age_1$WT, na.rm = TRUE)
+      out_df$median_WT[age] <- round(out_df$median_WT[age], digits = 0)
+      out_df$median_n[age] <- length(which(age_1$WT == out_df$median_WT[age]))
+      out_df$quantile_45[age] <- round(quantile(age_1$WT, probs = 0.45,  na.rm = TRUE), digits = 0)
+      out_df$quantile_55[age] <- round(quantile(age_1$WT, probs = 0.55, na.rm = TRUE), digits = 0)
+      
       out_df$mean_WT[age] <- mean(age_1$WT, na.rm = TRUE)
     }
   
@@ -358,16 +341,19 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
   time_start <- Sys.time()
   electives_only <- hes_data[hes_data$cohort == 1,]
   
-  if(!("WT" %in% colnames(hes_data)))
+  if(!("WT" %in% colnames(hes_data))){
     electives_only <- make_wt_variable(electives_only)
+  }
   
   missing_rtt_week <- which(is.na(electives_only$rttstart_week))
   missing_rtt_year <- which(is.na(electives_only$rttstart_YYYY))
   
-  if(length(missing_rtt_week) >0)
+  if(length(missing_rtt_week) >0){
     electives_only <- electives_only[-missing_rtt_week,]  
-  if(length(missing_rtt_year) >0)
+  }
+  if(length(missing_rtt_year) >0){
     electives_only <- electives_only[-missing_rtt_year,]  
+  }
   
   
   elective_cols <- which(colnames(electives_only) %in% c("rttstart_week", "rttstart_YYYY",
@@ -405,7 +391,7 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
   print("Creating parallel jobs")
   print(nrows_df)
   elective_rows <- seq(1, nrows_df)
-  cluster_function <- snow::makeCluster(spec = num_cores,  outfile = "./cluster_log_file_TS.txt")
+  cluster_function <- snow::makeCluster(spec = num_cores,  outfile = "./cluster_log_file_TS.txt", type = "SOCK")
   function_input <- snow::clusterSplit(cluster_function, elective_rows)
   toc()
   tic("Loading up elective functions")
@@ -437,8 +423,9 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
   print("Finished")
   time_end <- Sys.time()
   print((time_end - time_start))
-  elective_data$date <- as.POSIXct( paste( 1, elective_data$rttstart_week, elective_data$rttstart_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
-  
+  elective_data$date <- ISOweek::ISOweek2date(paste0(elective_data$rttstart_YYYY, "-W", 
+                                                     str_pad(elective_data$rttstart_week, width = 2, 
+                                                             side = "left", pad = "0"), "-1")) 
   
   elective_data <- remove_wt_outliers(elective_data)
   
@@ -463,7 +450,7 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
       end_date <- as.Date("2012-03-01")
     }
   electives_only <- hes_data[hes_data$cohort == 1,]
-  elective_cols <- which(colnames(electives_only) %in% c("rttstart", "admidate_MDY",
+  elective_cols <- which(colnames(electives_only) %in% c("rttstart", "epistart_MDY",
                                                          "WT","Frail","ICD","agegrp_v3"))
   electives_only <- electives_only[,elective_cols]
   
@@ -486,7 +473,7 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
 
 bundle_props <- function(hes_data){
   
-  narrowed_hes <- hes_data[,which(colnames(hes_data) %in% c("admidate_week","admidate_YYYY", "ICD",
+  narrowed_hes <- hes_data[,which(colnames(hes_data) %in% c("epistart_week","epistart_YYYY", "ICD",
                                                             "agegrp_v3","ICD","MainICD10Cat",
                                                             "cohort", "rttstart_week","rttstart_YYYY"))]
   
@@ -513,7 +500,8 @@ bundle_props <- function(hes_data){
                                                                elective_bundle_data$agegrp_v3), FUN = sum)
   tot_vals <- tot_vals[order(tot_vals$Group.4,tot_vals$Group.3,tot_vals$Group.2),]
   weekly_ICD_vals_elec <- weekly_ICD_vals_elec[order(weekly_ICD_vals_elec$Group.1,
-                                                     weekly_ICD_vals_elec$Group.4,weekly_ICD_vals_elec$Group.3,
+                                                     weekly_ICD_vals_elec$Group.4,
+                                                     weekly_ICD_vals_elec$Group.3,
                                                      weekly_ICD_vals_elec$Group.2),]
   
   ## make out df 
@@ -554,12 +542,12 @@ bundle_props <- function(hes_data){
   
   
   weekly_ICD_vals_emerg <- aggregate(emergency_bundle_data, by = list(emergency_bundle_data$non_bundled_icd,
-                                                               emergency_bundle_data$admidate_week,
-                                                               emergency_bundle_data$admidate_YYYY,
+                                                               emergency_bundle_data$epistart_week,
+                                                               emergency_bundle_data$epistart_YYYY,
                                                                emergency_bundle_data$agegrp_v3), FUN = sum)
   tot_vals <- aggregate(emergency_bundle_data, by = list(emergency_bundle_data$ICD,
-                                                               emergency_bundle_data$admidate_week,
-                                                               emergency_bundle_data$admidate_YYYY,
+                                                               emergency_bundle_data$epistart_week,
+                                                               emergency_bundle_data$epistart_YYYY,
                                                                emergency_bundle_data$agegrp_v3), FUN = sum)
   tot_vals <- tot_vals[order(tot_vals$Group.4,tot_vals$Group.3,tot_vals$Group.2),]
   weekly_ICD_vals_emerg <- weekly_ICD_vals_emerg[order(weekly_ICD_vals_emerg$Group.1,
@@ -570,16 +558,16 @@ bundle_props <- function(hes_data){
   
   proportions_emerg_out <- data.frame(matrix(nrow = (length(cats_icd) * nrow(tot_vals)),
                                             ncol = 4))
-  colnames(proportions_emerg_out) <- c("admidate_week","admidate_YYYY","agegrp_v3",
+  colnames(proportions_emerg_out) <- c("epistart_week","epistart_YYYY","agegrp_v3",
                                       "ICD")
-  proportions_emerg_out$admidate_week <- rep(tot_vals$Group.2, length(cats_icd))
-  proportions_emerg_out$admidate_YYYY <- rep(tot_vals$Group.3, length(cats_icd))
+  proportions_emerg_out$epistart_week <- rep(tot_vals$Group.2, length(cats_icd))
+  proportions_emerg_out$epistart_YYYY <- rep(tot_vals$Group.3, length(cats_icd))
   proportions_emerg_out$agegrp_v3 <- rep(tot_vals$Group.4, length(cats_icd))
   proportions_emerg_out$ICD <- rep(cats_icd, each = nrow(tot_vals))
   
   proportions_emerg_out <- dplyr::left_join(proportions_emerg_out, weekly_ICD_vals_emerg,
-                                           by = c("admidate_week" = "Group.2",
-                                                  "admidate_YYYY" = "Group.3",
+                                           by = c("epistart_week" = "Group.2",
+                                                  "epistart_YYYY" = "Group.3",
                                                   "agegrp_v3" = "Group.4",
                                                   "ICD" = "Group.1"))
   
