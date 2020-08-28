@@ -15,13 +15,13 @@ hes_transitions <- function(hes_dataset){
   }
   
   ## cohort 3 WT 
-  if(!("WaitingTimes" %in% colnames(hes_dataset))){
+  if(!("WaitingTime" %in% colnames(hes_dataset))){
   
     print("Getting the WT data")
-    hes_dataset$WaitingTime <- NA
-    elective_df <- hes_dataset[hes_dataset$cohort == 1,]
-    one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
-    elective_df$WaitingTime[one_year_under] <- elective_df$elecdur[one_year_under]
+    hes_dataset$WaitingTime <- as.numeric(admidate_MDY - rttstart)
+    elective_df <- hes_dataset[hes_dataset$cohort != 3,]
+    one_year_under <- which(as.integer(elective_df$WaitingTime) <= 365)
+    elective_df$WaitingTime[one_year_under] <- elective_df$WaitingTime[one_year_under]
     hes_dataset[hes_dataset$cohort == 1, "WaitingTime"] <- elective_df$WaitingTime
     
   
@@ -33,7 +33,7 @@ hes_transitions <- function(hes_dataset){
   wait_time <- hes_dataset$admidate_MDY[cohort2_indies] - hes_dataset$rttstart[cohort2_indies]
   hes_dataset$WaitingTime[cohort2_indies] <- wait_time
   
-  if(!("WT$" %in% colnames(hes_dataset))){
+  if(!("WT" %in% colnames(hes_dataset))){
     hes_dataset$WT <- hes_dataset$WaitingTime
   }else{
     hes_dataset$WT_old <- hes_dataset$WT
