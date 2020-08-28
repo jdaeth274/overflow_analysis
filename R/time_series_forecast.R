@@ -557,7 +557,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               }else{
                 
                 if(cohort3 == FALSE){
-                  Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","admidate_week")]
+                  Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","epistart_week")]
                 }else{
                   Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","rttstart_week")]
                 }
@@ -567,22 +567,26 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                 tot_dates <- c(Train$date, forecast_weeks)
                 
                 if(cohort3 == FALSE){
-                  mean_vals <- aggregate(Train, by = list(Train$admidate_week), FUN = mean , na.rm = TRUE)$prop_cc
-                  sd_vals <-  aggregate(Train, by = list(Train$admidate_week), FUN = sd , na.rm = TRUE)$prop_cc
+                  mean_vals <- aggregate(Train, by = list(Train$epistart_week), FUN = mean , na.rm = TRUE)$prop_cc
+                  sd_vals <-  aggregate(Train, by = list(Train$epistart_week), FUN = sd , na.rm = TRUE)$prop_cc
                 }else{
                   mean_vals <- aggregate(Train, by = list(Train$rttstart_week), FUN = mean , na.rm = TRUE)$prop_cc
                   sd_vals <- aggregate(Train, by = list(Train$rttstart_week), FUN = sd , na.rm = TRUE)$prop_cc
                 }
                 pred_dates <- tot_dates[tot_dates>max(Train$date)]
-                start_week <- Train[which.max(Train$date),which(colnames(Train) == "admidate_week" | colnames(Train) == "rttstart_week")] + 1
+                start_week <- Train[which.max(Train$date),which(colnames(Train) == "epistart_week" | colnames(Train) == "rttstart_week")] + 1
                 end_week <- start_week - 1
                 
-                pred_data_vals <- mean_vals[start_week:52]
-                sd_data_vals <- sd_vals[start_week:52]
-                if(length(pred_data_vals) != 52){
-                  pred_data_vals <- c(pred_data_vals,mean_vals[1:end_week])
-                  sd_data_vals <- c(sd_data_vals,sd_vals[1:end_week])
+                week_seq <- start_week
+                while(length(week_seq) != forecast_period){
+                  next_week <- week_seq[length(week_seq)] + 1
+                  if(next_week == 53){
+                    next_week <- 1
+                  }
+                  week_seq <- append(week_seq, next_week)
                 }
+                pred_data_vals <- mean_vals[week_seq]
+                sd_data_vals <- sd_vals[week_seq]
                 
                 patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
                 pred <- data.frame(matrix(ncol = 3, nrow = length(pred_dates), data = pred_data_vals))
