@@ -852,7 +852,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   
   cohort1_med_nonzero <- which(cohort_1_ts_admissions$p50_WT_ICDc != 0  )
   cohort1_mean_nonzero <- which(cohort_1_ts_admissions$mean_WT_ICDc != 0)
-  cohort1_frail_nonzero <- which(cohort_1_ts_admissions$prop_Frail != 0 & cohort_1_ts_admissions$prop_Frail != 1)
+  cohort1_frail_nonzero <- which(!is.na(cohort_1_ts_admissions$prop_Frail) & cohort_1_ts_admissions$prop_Frail != 0 & cohort_1_ts_admissions$prop_Frail != 1)
   cohort1_cc_nonzero <- which(cohort_1_ts_admissions$prop_cc != 0 & cohort_1_ts_admissions$prop_cc != 1)
   cohort3_frail_nonzero <- which(cohort_3_ts$prop_Frail != 0 & cohort_3_ts$prop_Frail != 1)
   cohort3_cc_nonzero <- which(cohort_3_ts$prop_cc != 0 & cohort_3_ts$prop_cc != 1)
