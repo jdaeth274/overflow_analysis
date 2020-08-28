@@ -135,8 +135,10 @@ running_emergencies_ts_in_parallel <- function(hes_data, num_cores){
   stopCluster(cluster_function)
   
   emergency_data <- dplyr::bind_rows(emergency_data_parallel)
-  emergency_data$date <- as.POSIXct( paste( 1, emergency_data$admidate_week, emergency_data$admidate_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
-  
+  emergency_data$date <- ISOweek::ISOweek2date(paste0(emergency_data$epistart_YYYY, "-W", 
+                                                      str_pad(emergency_data$epistart_week, width = 2, 
+                                                              side = "left", pad = "0"), "-1")) 
+
   return(emergency_data)
   
 }
@@ -202,10 +204,10 @@ elective_df_ts <- function(out_indies, electives_only_Df, electives_only){
 
 make_wt_variable <- function(elective_df){
   
-  one_year_under <- which(as.integer(elective_df$elecdur) <= 365)
+  one_year_under <- which(as.integer(elective_df$WaitingTime) <= 365)
   
   elective_df$WT <- NA
-  elective_df$WT[one_year_under] <- elective_df$elecdur[one_year_under]
+  elective_df$WT[one_year_under] <- elective_df$WaitingTime[one_year_under]
   
   return(elective_df)
   
@@ -339,16 +341,19 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
   time_start <- Sys.time()
   electives_only <- hes_data[hes_data$cohort == 1,]
   
-  if(!("WT" %in% colnames(hes_data)))
+  if(!("WT" %in% colnames(hes_data))){
     electives_only <- make_wt_variable(electives_only)
+  }
   
   missing_rtt_week <- which(is.na(electives_only$rttstart_week))
   missing_rtt_year <- which(is.na(electives_only$rttstart_YYYY))
   
-  if(length(missing_rtt_week) >0)
+  if(length(missing_rtt_week) >0){
     electives_only <- electives_only[-missing_rtt_week,]  
-  if(length(missing_rtt_year) >0)
+  }
+  if(length(missing_rtt_year) >0){
     electives_only <- electives_only[-missing_rtt_year,]  
+  }
   
   
   elective_cols <- which(colnames(electives_only) %in% c("rttstart_week", "rttstart_YYYY",
@@ -418,8 +423,9 @@ running_elective_ts_in_parallel <- function(hes_data, num_cores, forecast_date, 
   print("Finished")
   time_end <- Sys.time()
   print((time_end - time_start))
-  elective_data$date <- as.POSIXct( paste( 1, elective_data$rttstart_week, elective_data$rttstart_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
-  
+  elective_data$date <- ISOweek::ISOweek2date(paste0(elective_data$rttstart_YYYY, "-W", 
+                                                     str_pad(elective_data$rttstart_week, width = 2, 
+                                                             side = "left", pad = "0"), "-1")) 
   
   elective_data <- remove_wt_outliers(elective_data)
   
