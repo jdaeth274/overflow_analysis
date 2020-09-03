@@ -4288,7 +4288,7 @@ reg_data_summariser2 <- function(reg_data,admi_type, week_num){
       if(length(which(is.na(current_df$ICD))) > 0)
         current_df <- current_df[-which(is.na(current_df$ICD)),]
       
-      current_df <- current_df[current_df$WT == "mean",]
+      current_df <- current_df[current_df$WT == "seven",]
       ga_df <- current_df[current_df$patient_group == ga_grouping,]
       cc_df <- current_df[current_df$patient_group == cc_grouping,]
       
