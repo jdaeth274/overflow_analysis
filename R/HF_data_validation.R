@@ -31,7 +31,7 @@ plotting_function <- function(hf_data, imp_data){
 
 
 
-hf_forecasts <- list.files("D:/Dropbox/COVID19/Overflow/JOSH/HF_out_data/forecasts/forecasts/", full.names = TRUE)
+hf_forecasts <- list.files("D:/Dropbox/COVID19/Overflow/JOSH/HF_out_data/forecasts/THF_outputs_20200901_2/THF_outputs_20200901_2/", full.names = TRUE)
 hf_forecasts <- hf_forecasts[c(7,9,8,5,4,3,2,1,6,10)]
 hf_fores <- lapply(hf_forecasts, read.csv, stringsAsFactors = FALSE)
 
