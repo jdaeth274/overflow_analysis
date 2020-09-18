@@ -5,7 +5,7 @@
 ##############################################################################################################
 # Required packages
 
-costs_function <- function(transitions_data_whole, costs_directory, output_dir, fyear){
+costs_function <- function(transitions_data_whole, costs_directory, FY = 1213, output_dir){
   
   
   ##############################################################################################################
@@ -25,22 +25,17 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   ## Load HES data
   
   if(class(transitions_data_whole) == "character"){
-    system.time(transitions_data_whole <- readRDS(here::here("time_series_forecasts", "time_series_forecasts.Rds")))  
+    system.time(transitions_data_whole <- fread("D:/Overflows/data/HES_APC_CC_0913_transitions_all_ICD.csv"))  
   }
   
   # keep variables you need
-  hes_data <- select(transitions_data_whole, c("procode3","admimeth_C","EpiEnd_FY","SUSHRGep", "ICD", "agegrp_v3", "admimeth_C", "WaitingTime"))
-  
-  # Pre-process HES data
-  # Keep HES data of yoi (FY of interest)
-  hes_data_yoi <- subset(hes_data, EpiEnd_FY == as.numeric(fyear))
+  hes_data <- select(transitions_data_whole, c("procode3","admimeth_C","EpiEnd_FY","SUSHRGep", "ICD", "agegrp_v3", "admimeth_C"))
   
   ##############################################################################################################
   ## Load costs data (all already inflated to 2020 costs)
   # Load organisational level unit costs
-  if(substr(costs_directory,nchar(costs_directory),nchar(costs_directory)) != "/"){
+  if(substr(costs_directory,nchar(costs_directory),nchar(costs_directory)) != "/")
     costs_directory <- paste(costs_directory,"/",sep = "")
-  }
   
   
   costs_data_path <- paste(costs_directory,"cleaned_2015_2019_orgrcs.csv",sep = "")
@@ -62,6 +57,12 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   # load national ref cost data for 1516 - for costs that are unmatched after using national_rcs1011
   rcs1516_path <- paste(costs_directory,"national_rcs1516.csv",sep = "")
   national_rcs1516 <- read.csv(rcs1516_path,fileEncoding = "UTF-8-BOM")
+  
+  ##############################################################################################################
+  # Pre-process HES data
+  # Keep HES data of yoi (FY of interest)
+  FY = FY ################################################# JD: I think here is where we can specify on the overflows masters sheet for each year?
+  hes_data_yoi <- subset(hes_data, EpiEnd_FY == FY)
   
   ##############################################################################################################
   # Pre-process Costs data
@@ -90,10 +91,10 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   merged_orglevel_1819 <- left_join(hes_data_yoi, org_costs_1819, 
                                     by = c("procode3" = "orgcode",
                                            "admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode", "EpiEnd_FY"))
+                                           "SUSHRGep" = "currencycode"))
   # subset MATCHED and UNMATCHED episodes
   matched_orglevel_1819 <- merged_orglevel_1819[!is.na(merged_orglevel_1819$unitcost),]
-  unmatched_orglevel_1819 <- merged_orglevel_1819[is.na(merged_orglevel_1819$unitcost),]
+  unmatched_orglevel_1819 <- mergedcosts_orglevel_1819[is.na(mergedcosts_orglevel_1819$unitcost),]
   
   # remove unitcost column from unmatched_orglevel_1819
   unmatched_orglevel_1819 <- select(unmatched_orglevel_1819, -unitcost)
@@ -101,22 +102,21 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   # 2. On national reference cost schedule (1819)
   # match unmatched_orglevel_1819 with national_rcs1819
   merged_rcslevel_1819 <- left_join(unmatched_orglevel_1819, national_rcs1819,
-                                    by = c("admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode"))
+                                   by = c("admimeth_C" = "admimeth_C",
+                                          "SUSHRGep" = "CURRENCY.CODE"))
   # subset MATCHED and UNMATCHED episodes
   matched_rcslevel_1819 <- merged_rcslevel_1819[!is.na(merged_rcslevel_1819$unitcost),]
   unmatched_rcslevel_1819 <- merged_rcslevel_1819[is.na(merged_rcslevel_1819$unitcost),]
   
   # remove unitcost column from unmatched_rcslevel_1819
-  unmatched_rcslevel_1819 <- select(unmatched_rcslevel_1819, -unitcost, -meancost, -actualcost, -expectedcost)
-  
-   ############################################################################
+  unmatched_rcslevel_1819 <- select(unmatched_rcslevel_1819, -unitcost)
+  ############################################################################
   # 3. On organization level reference costs (1718)
   # match unmatched_rcslevel_1819 with org_costs_1718
   merged_orglevel_1718 <- left_join(unmatched_rcslevel_1819, org_costs_1718,
                                     by = c("procode3" = "orgcode",
                                            "admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode", "EpiEnd_FY"))
+                                           "SUSHRGep" = "currencycode"))
   # subset MATCHED and UNMATCHED episodes
   matched_orglevel_1718 <- merged_orglevel_1718[!is.na(merged_orglevel_1718$unitcost),]
   unmatched_orglevel_1718 <- merged_orglevel_1718[is.na(merged_orglevel_1718$unitcost),]
@@ -127,21 +127,21 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   # 4. On national reference cost schedule (1718)
   # match unmatched_orglevel_1718 with national_rcs1718
   merged_rcslevel_1718 <- left_join(unmatched_orglevel_1718, national_rcs1718,
-                                    by = c("admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode"))
+                                    by = c("admimeth_C" = "admimeth_C",
+                                           "SUSHRGep" = "CURRENCY.CODE"))
   # subset MATCHED and UNMATCHED episodes
   matched_rcslevel_1718 <- merged_rcslevel_1718[!is.na(merged_rcslevel_1718$unitcost),]
   unmatched_rcslevel_1718 <- merged_rcslevel_1718[is.na(merged_rcslevel_1718$unitcost),]
   
   # remove unitcost column from unmatched_rcslevel_1718
-  unmatched_rcslevel_1718 <- select(unmatched_rcslevel_1718, -unitcost, -meancost, -actualcost, -expectedcost)
+  unmatched_rcslevel_1718 <- select(unmatched_rcslevel_1718, -unitcost)
   ############################################################################
   # 5. On organization level reference costs (1617)
   # match unmatched_rcslevel_1718 with org_costs_1617
   merged_orglevel_1617 <- left_join(unmatched_rcslevel_1718, org_costs_1617,
                                     by = c("procode3" = "orgcode",
                                            "admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode", "EpiEnd_FY"))
+                                           "SUSHRGep" = "currencycode"))
   # subset MATCHED and UNMATCHED episodes
   matched_orglevel_1617 <- merged_orglevel_1617[!is.na(merged_orglevel_1617$unitcost),]
   unmatched_orglevel_1617 <- merged_orglevel_1617[is.na(merged_orglevel_1617$unitcost),]
@@ -152,21 +152,21 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   # 6. On national reference cost schedule (1617)
   # match unmatched_orglevel_1617 with national_rcs1617
   merged_rcslevel_1617 <- left_join(unmatched_orglevel_1617, national_rcs1617,
-                                    by = c("admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode"))
+                                    by = c("admimeth_C" = "admimeth_C",
+                                           "SUSHRGep" = "CURRENCY.CODE"))
   # subset MATCHED and UNMATCHED episodes
   matched_rcslevel_1617 <- merged_rcslevel_1617[!is.na(merged_rcslevel_1617$unitcost),]
   unmatched_rcslevel_1617 <- merged_rcslevel_1617[is.na(merged_rcslevel_1617$unitcost),]
   
   # remove unitcost column from unmatched_rcslevel_1718
-  unmatched_rcslevel_1617 <- select(unmatched_rcslevel_1617, -unitcost, -meancost, -actualcost, -expectedcost)
+  unmatched_rcslevel_1617 <- select(unmatched_rcslevel_1617, -unitcost)
   ############################################################################
   # 7. On organization level reference costs (1516)
   # match unmatched_rcslevel_1617 with org_costs_1516
   merged_orglevel_1516 <- left_join(unmatched_rcslevel_1617, org_costs_1516,
                                     by = c("procode3" = "orgcode",
                                            "admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode", "EpiEnd_FY"))
+                                           "SUSHRGep" = "currencycode"))
   # subset MATCHED and UNMATCHED episodes
   matched_orglevel_1516 <- merged_orglevel_1516[!is.na(merged_orglevel_1516$unitcost),]
   unmatched_orglevel_1516 <- merged_orglevel_1516[is.na(merged_orglevel_1516$unitcost),]
@@ -177,38 +177,32 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   # 8. On national reference cost schedule (1516)
   # match unmatched_orglevel_1516 with national_rcs1516
   merged_rcslevel_1516 <- left_join(unmatched_orglevel_1516, national_rcs1516,
-                                    by = c("admimeth_C" = "admimeth_c",
-                                           "SUSHRGep" = "currencycode"))
+                                    by = c("admimeth_C" = "admimeth_C",
+                                           "SUSHRGep" = "CURRENCY.CODE"))
   ############################################################################
   # append all matched dataframes to form complete hes-cost merge
   full_mergedcosts <- rbind(matched_orglevel_1819,
-                            merged_rcslevel_1819,
+                            matched_rcslevel_1819,
                             matched_orglevel_1718,
-                            merged_rcslevel_1718,
+                            matched_rcslevel_1718,
                             matched_orglevel_1617,
-                            merged_rcslevel_1617,
+                            matched_rcslevel_1617,
                             matched_orglevel_1516,
                             merged_rcslevel_1516)
   
   # figure out how many unmatched episodes we still have after this
   print('Number of uncosted HES episodes')
   unmatched <- sum(is.na(full_mergedcosts$unitcost))
-  unmatched
   
   print('Number of HES episodes')
   total <- nrow(full_mergedcosts)
-  total
   
   print('Percentage of HES episodes unmatched')
   (unmatched/total)*100
   
   # drop unmatched from full_mergedcosts$unitcost
   full_mergedcosts <- full_mergedcosts[!is.na(full_mergedcosts$unitcost),]
-  saveRDS(full_mergedcosts, paste0(output_dir, "/mergedcosts_", fyear, ".Rds"))
   
-}  
-  
-calculate_unitcosts <- function(full_mergedcosts, costs_directory, output_dir){
   ##############################################################################################################
   # Now we move onto calculating unit costs
   # first, calculate average unit cost per patient group (mean, sd, min, p25, p50, p75, max)
@@ -217,9 +211,9 @@ calculate_unitcosts <- function(full_mergedcosts, costs_directory, output_dir){
   
   avgcost <- do.call(data.frame, aggregate(full_mergedcosts$unitcost, 
                                            list(full_mergedcosts$ICD, full_mergedcosts$agegrp_v3, full_mergedcosts$admimeth_C),
-                                           function(x) c(mean = mean(x), sd = sd(x), n = length(x))))
+                                           function(x) c(mean = mean(x), sd = sd(x))))
   
-  colnames(avgcost) <- c("ICD","agegrp","admimeth","avg_cost","sd_cost", "n")
+  colnames(avgcost) <- c("ICD","agegrp","admimeth","avg_cost","sd_cost")
   
   costs <- left_join(avgcost, quantilecost,
                      by = c("ICD" = "ICD",
@@ -290,23 +284,23 @@ calculate_unitcosts <- function(full_mergedcosts, costs_directory, output_dir){
   # mean and sd cost within each WT quartiles
   avg_costs_wtp025 <- do.call(data.frame, aggregate(electives_p025$unitcost, 
                                                     list(electives_p025$ICD, electives_p025$agegrp_v3),
-                                                    function(x) c(mean = mean(x), sd = sd(x), n = length(x))))
-  colnames(avg_costs_wtp025) <- c("ICD","agegrp_v3","avg_cost","sd_cost", "n")
+                                                    function(x) c(mean = mean(x), sd = sd(x))))
+  colnames(avg_costs_wtp025) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
   
   avg_costs_wtp2550 <- do.call(data.frame, aggregate(electives_p2550$unitcost, 
                                                      list(electives_p2550$ICD, electives_p2550$agegrp_v3),
-                                                     function(x) c(mean = mean(x), sd = sd(x), n = length(x))))
-  colnames(avg_costs_wtp2550) <- c("ICD","agegrp_v3","avg_cost","sd_cost", "n")
+                                                     function(x) c(mean = mean(x), sd = sd(x))))
+  colnames(avg_costs_wtp2550) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
   
   avg_costs_wtp5075 <- do.call(data.frame, aggregate(electives_p5075$unitcost, 
                                                      list(electives_p5075$ICD, electives_p5075$agegrp_v3),
-                                                     function(x) c(mean = mean(x), sd = sd(x), n = length(x))))
-  colnames(avg_costs_wtp5075) <- c("ICD","agegrp_v3","avg_cost","sd_cost", "n")
+                                                     function(x) c(mean = mean(x), sd = sd(x))))
+  colnames(avg_costs_wtp5075) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
   
   avg_costs_wtp75100 <- do.call(data.frame, aggregate(electives_p75100$unitcost, 
                                                       list(electives_p75100$ICD, electives_p75100$agegrp_v3),
-                                                      function(x) c(mean = mean(x), sd = sd(x), n = length(x))))
-  colnames(avg_costs_wtp75100) <- c("ICD","agegrp_v3","avg_cost","sd_cost", "n")
+                                                      function(x) c(mean = mean(x), sd = sd(x))))
+  colnames(avg_costs_wtp75100) <- c("ICD","agegrp_v3","avg_cost","sd_cost")
   
   # combine mean, sd, and quantile costs at each WT quartiles
   costs_wtp025 <- left_join(avg_costs_wtp025, quant_costs_wtp025,

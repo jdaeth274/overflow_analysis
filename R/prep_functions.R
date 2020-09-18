@@ -74,6 +74,7 @@ import_APC <- function(db, year_char){
            susrecid = SUSRECID,
            epistart_MDY = EPISTART, 
            epiend = EPIEND, 
+           SUSHRG, SUSCOREHRG, SUSHRGVERS,
            IMPFRAILTY_DELIRIUM, IMPFRAILTY_DEMENTIA, IMPFRAILTY_DEPENDENCE, 
            IMPFRAILTY_FALLSFRAX, IMPFRAILTY_MOBILITY, IMPFRAILTY_ULCERS, IMPFRAILTY_SENILITY) %>% 
     collect()

@@ -59,7 +59,7 @@ hes_transitions <- function(hes_dataset){
   ## CC to G&A ##
   print("CC > GA")
   hes_dataset$cc_ga <- 0
-  hes_dataset[(hes_dataset$ccdisdest %in% c(1,2,3)) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg != 1),"cc_ga"] <- 1
+  hes_dataset[!(is.na(hes_dataset$ccdisdest)) & (hes_dataset$ccdisdest %in% c(1,2,3)) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg != 1),"cc_ga"] <- 1
   hes_dataset[!(is.na(hes_dataset$ccdisdest)) & (hes_dataset$ccdisdest > 3) & (hes_dataset$cc == 1), "cc_ga"] <- 0
   hes_dataset[hes_dataset$cc == 0, "cc_ga"] <- NA
   
@@ -74,14 +74,14 @@ hes_transitions <- function(hes_dataset){
   ## cc deaths ##
   print("CC deaths")
   hes_dataset$cc_death <- 0
-  hes_dataset[(hes_dataset$dismeth == 4) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg == 1),"cc_death"] <- 1
+  hes_dataset[!is.na(hes_dataset$dismeth) & (hes_dataset$dismeth == 4) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg == 1),"cc_death"] <- 1
   hes_dataset[!is.na(hes_dataset$ccdisdest) & (hes_dataset$ccdisdest == 6) & (hes_dataset$cc == 1) & (hes_dataset$cc_dis_flg == 1),"cc_death"] <- 1
   hes_dataset[hes_dataset$cc == 0 | is.na(hes_dataset$death),"cc_death" ] <- NA
   
   ## ga deaths ##
   print("GA deaths")
   hes_dataset$ga_death <- 0
-  hes_dataset[!is.na(hes_dataset$dismeth) &hes_dataset$dismeth == 4 & hes_dataset$cc == 0, "ga_death"] <- 1
+  hes_dataset[!is.na(hes_dataset$dismeth) & hes_dataset$dismeth == 4 & hes_dataset$cc == 0, "ga_death"] <- 1
   hes_dataset$ga_death[which(is.na(hes_dataset$death))] <- NA
   
   ## ga to cc then die in ga ##

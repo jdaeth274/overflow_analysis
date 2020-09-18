@@ -88,7 +88,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                               cc_icd_ages, cutoff_dates){
   
   
-  # join the year and week variable to a date. Use UK  convention that week starts on a Monday.
+  # join the year and week variable to a date. 
   if(cohort3 == TRUE){
     ts_data$date <- ISOweek::ISOweek2date(paste0(ts_data$rttstart_YYYY, "-W", 
                                                  str_pad(ts_data$rttstart_week, width = 2, 
@@ -107,11 +107,12 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
     ts_data <- ts_data[-na_dates,]
   }
   
+  
   quad_y <- grep("YYYY", colnames(ts_data))
   
   
   time_start <- Sys.time()
-  
+
   pdf(file = results_name, paper = "A4r", width = 10, height = 7)
   
   
@@ -123,20 +124,20 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
   current_group <- 1
   
   df_preds <- data.frame(patient_group = numeric(),
-                         lower=numeric(),
-                         median=numeric(),
-                         upper=numeric(),
-                         date=as.Date(character()))
+                                lower=numeric(),
+                                median=numeric(),
+                                upper=numeric(),
+                                date=as.Date(character()))
   df_wait <- data.frame(patient_group = numeric(),
-                        lower=numeric(),
-                        median=numeric(),
-                        upper=numeric(),
-                        date=as.Date(character()))
+                               lower=numeric(),
+                               median=numeric(),
+                               upper=numeric(),
+                               date=as.Date(character()))
   df_frail <- data.frame(patient_group = numeric(),
-                         lower=numeric(),
-                         median=numeric(),
-                         upper=numeric(),
-                         date=as.Date(character()))
+                                lower=numeric(),
+                                median=numeric(),
+                                upper=numeric(),
+                                date=as.Date(character()))
   df_cc <- data.frame(patient_group = numeric(),
                       lower=numeric(),
                       median=numeric(),
@@ -146,373 +147,50 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
   cat("This number of categories:",group_num,"\n")
   ad <- admit_type
   
-  
+
   
   if(length(only_ICD) > 0){
     icds_to_look_at <- ts_data$ICD[grep(only_ICD,ts_data$ICD)[1]]
   }else{
     icds_to_look_at <- unique(ts_data$ICD)
   }
+  
   for ( age in unique(ts_data$agegrp_v3)){
-    for (d in icds_to_look_at){
-      cat("On group number:", current_group)
-      print(paste("age icd:",agers_icders[current_group]))
-      #print(paste("On group number:", current_group))
-      current_group <- current_group + 1
-      temp<-ts_data[ts_data$agegrp_v3==age &
-                      ts_data$ICD==d,]
-      temp <- temp[temp$date > as.Date(cutoff_dates[1]) &
-                     temp$date < as.Date(cutoff_dates[2]) ,]
-      
-      if(cohort3 == TRUE){
-        
-      }
-      
-      
-      test<-sum(temp$Admissions>0)>10
-      if (test){
-        if(forecast_admissions == TRUE){
-          #ggplot(temp)+ aes(x=date,y=Admissions,colour=as.factor(agegrp_v2))+geom_line()
+      for (d in icds_to_look_at){
+          cat("On group number:", current_group)
+          print(paste("age icd:",agers_icders[current_group]))
+          #print(paste("On group number:", current_group))
+          current_group <- current_group + 1
+          temp<-ts_data[ts_data$agegrp_v3==age &
+                       ts_data$ICD==d,]
+          temp <- temp[temp$date > as.Date(cutoff_dates[1]) &
+                         temp$date < as.Date(cutoff_dates[2]) ,]
+
           
-          # large number of admissions
-          # 
-          if(diagnostics_only == TRUE){
-            Train<-temp[,c("date","Admissions")]
-          }else{
-            Train<-temp[temp$date<as.Date(train_date),c("date","Admissions")]
-          }
-          Train<-Train[order(Train$date),]
-          a1 <- matrix(c(0,0),2, 1)
-          P1 <- matrix(0, 2, 2)
-          P1inf <- diag(2)
-          
-          
-          m<-as.formula('Admissions~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
-          
-          model <- SSModel(m,H = matrix(NA),
-                           data=Train)
-          
-          
-          fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
-          
-          
-          out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
-          Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
-          
-          ###################################################################
-          ## Diagnostics for admissions #####################################
-          ###################################################################
-          
-          if(diagnostics_only == TRUE){
+          test<-sum(temp$Admissions>0)>10
+          if (test){
+            if(forecast_admissions == TRUE){
+            #ggplot(temp)+ aes(x=date,y=Admissions,colour=as.factor(agegrp_v2))+geom_line()
             
-            diagnostics_function(Train, metric = "Admissions", out,
-                                 title_name = paste(d,age,ad) )
-          }
-          
-          if(diagnostics_only == FALSE){
-            ## altering here and here in subequent variables ##
-            ## First we calculate the difference in weeks between the last date of our data 
-            ## and then the date we wish to forecast from 
-            forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
-                                                strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-            tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
-            forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
-            forecast_weeks <- forecast_weeks[-1]
-            pred_admi <- temp[temp$date > max(Train$date), 'Admissions']
-            ## This double checks there isn't any that overlap from our forecast, if there aren't
-            ## which we expect, this is the difference between our forecast date and our end date 
-            ## plus the length of time we want to forecast forward in weeks 
-            if(length(pred_admi) < length(forecast_weeks)){
-              pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
-            }
-            
-            tot_dates <- c(Train$date, forecast_weeks)
-            tot_ad <- c(Train$Admissions, pred_admi)
-            
-            df <- cbind.data.frame(tot_dates, tot_ad)
-            colnames(df) <- c("date","Admissions")
-            df<-df[order(df$date),]
-            df$signal<-NA
-            df[df$date <= max(Train$date),'signal']<-Train$predicted
-            
-            
-            
-            n<-tot_period
-            
-            
-            v<-var(residuals(out,type="response"))
-            newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
-                               SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
-            
-            pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
-                            states =c('all'), se.fit = FALSE, nsim = 1000, 
-                            maxiter = 52, filtered = TRUE)
-            pred<-as.data.frame(pred)
-            df$fit<-NA
-            df$upr<-NA
-            df$lwr<-NA
-            df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
-            
-            pred_dates <- df$date[df$date>max(Train$date)]
-            patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
-            rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
-            colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-            df_preds <- rbind.data.frame(df_preds, rows_to_add)
-            
-            
-            
-            print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_admission")+geom_line()+
-                    geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
-                    geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.35, colour = NA
-                    ) +
-                    geom_line(aes(x=date,y=Admissions,colour='Admissions_actual'))+
-                    theme_bw(base_size = 12, base_family = "Helvetica")+
-                    theme(legend.position="right")+ylab("")+xlab("")+ labs(colour = "Legend") +
-                    scale_color_manual(values = c("Fit_to_data" = "blue",
-                                                  "Admissions_actual" = "red",
-                                                  "Predicted_admission" = "black"))+
-                    ggtitle(paste("Admissions",ad,d, age )))
-            
-          }
-        }
-        
-        if(forecast_wait == TRUE & ad == "Elective"){
-          
-          
-          
-          if(diagnostics_only == TRUE)
-            Train<-temp[,c("date",wait_time_col)]
-          else
-            Train<-temp[temp$date<as.Date(train_date),c("date",wait_time_col)]
-          
-          Train<-Train[order(Train$date),]
-          a1 <- matrix(c(0,0),2, 1)
-          P1 <- matrix(0, 2, 2)
-          P1inf <- diag(2)
-          
-          formula_strings <- paste(wait_time_col, '~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)', sep = "")
-          
-          m<-as.formula(formula_strings)
-          
-          model <- SSModel(m,H = matrix(NA),
-                           data=Train)
-          print("Waiting time forecast")
-          
-          fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
-          
-          
-          out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
-          Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
-          
-          ###################################################################
-          ## Diagnostics ####################################################
-          ###################################################################
-          
-          if(diagnostics_only == TRUE){
-            
-            diagnostics_function(Train, metric = "Wait time", out,
-                                 title_name = paste(d,age,ad) )
-          }
-          if(diagnostics_only == FALSE){
-            ## First we calculate the difference in weeks between the last date of our data 
-            ## and then the date we wish to forecast from 
-            forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
-                                                strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-            tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
-            forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
-            forecast_weeks <- forecast_weeks[-1]
-            pred_admi <- temp[temp$date > max(Train$date), wait_time_col]
-            ## This double checks there isn't any that overlap from our forecast, if there aren't
-            ## which we expect, this is the difference between our forecast date and our end date 
-            ## plus the length of time we want to forecast forward in weeks 
-            if(length(pred_admi) < length(forecast_weeks))
-              pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
-            
-            
-            tot_dates <- c(Train$date, forecast_weeks)
-            tot_ad <- c(Train[,wait_time_col], pred_admi)
-            
-            df <- cbind.data.frame(tot_dates, tot_ad)
-            colnames(df) <- c("date","Wait_time")
-            df<-df[order(df$date),]
-            df$signal<-NA
-            df[df$date <= max(Train$date),'signal']<-Train$predicted
-            
-            
-            
-            n<-tot_period
-            
-            
-            v<-var(residuals(out,type="response"))
-            newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
-                               SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
-            
-            pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
-                            states =c('all'), se.fit = FALSE, nsim = 1000, 
-                            maxiter = 52, filtered = TRUE)
-            pred<-as.data.frame(pred)
-            df$fit<-NA
-            df$upr<-NA
-            df$lwr<-NA
-            df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
-            
-            
-            
-            pred_dates <- df$date[df$date>max(Train$date)]
-            patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
-            rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
-            colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-            df_wait <- rbind.data.frame(df_wait, rows_to_add)
-            
-            
-            #b<-as.Date("2019-07-01")
-            print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted wait time")+geom_line()+
-                    geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
-                    geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
-                                linetype = 2, colour = NA) +
-                    geom_line(aes(x=date,y=df[,2],colour='Actual_WT_data'))+
-                    theme_bw(base_size = 12, base_family = "Helvetica")+
-                    theme(legend.position="right")+ylab("")+xlab("")+
-                    scale_color_manual(values = c("Fit_to_data" = "blue",
-                                                  "Actual_WT_data" = "red",
-                                                  "Predicted wait time" = "black"))+
-                    ggtitle(paste("Waiting time",ad,age, d )))
-          }
-        }
-        
-        if(forecast_frail == TRUE){
-          
-          if(!any(grepl("prop_Frail",colnames(temp)))){
-            temp$prop_Frail <- temp$Frail / temp$Admissions
-          }
-          
-          
-          
-          if(diagnostics_only == TRUE){
-            Train<-temp[,c("date","prop_Frail")]
-          }else{
-            Train<-temp[temp$date<as.Date(train_date),c("date","prop_Frail")]
-          }
-          Train<-Train[order(Train$date),]
-          a1 <- matrix(c(0,0),2, 1)
-          P1 <- matrix(0, 2, 2)
-          P1inf <- diag(2)
-          
-          m<-as.formula('prop_Frail~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                         SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
-          
-          model <- SSModel(m,H = matrix(NA),
-                           data=Train)
-          print("Proportion frail")
-          
-          fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
-          
-          
-          out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
-          Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
-          
-          if(diagnostics_only == TRUE){
-            diagnostics_function(Train, metric = "Proportion frail", out,
-                                 title_name = paste(d,age,ad) )
-          }
-          
-          if(diagnostics_only == FALSE){
-            ## First we calculate the difference in weeks between the last date of our data 
-            ## and then the date we wish to forecast from 
-            forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
-                                                strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
-            tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
-            forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
-            forecast_weeks <- forecast_weeks[-1]
-            pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]
-            ## This double checks there isn't any that overlap from our forecast, if there aren't
-            ## which we expect, this is the difference between our forecast date and our end date 
-            ## plus the length of time we want to forecast forward in weeks 
-            if(length(pred_admi) < length(forecast_weeks)){
-              pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
-            }
-            
-            tot_dates <- c(Train$date, forecast_weeks)
-            tot_ad <- c(Train[,"prop_Frail"], pred_admi)#
-            
-            df <- cbind.data.frame(tot_dates, tot_ad)
-            colnames(df) <- c("date","prop_Frail")#
-            df<-df[order(df$date),]
-            df$signal<-NA
-            df[df$date <= max(Train$date),'signal']<-Train$predicted
-            
-            
-            
-            n<-tot_period
-            
-            
-            v<-var(residuals(out,type="response"))
-            newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
-                               SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
-            
-            pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
-                            states =c('all'), se.fit = FALSE, nsim = 1000, 
-                            maxiter = 52, filtered = TRUE)
-            pred<-as.data.frame(pred)
-            df$fit<-NA
-            df$upr<-NA
-            df$lwr<-NA
-            df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
-            
-            pred_dates <- df$date[df$date>max(Train$date)]
-            patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
-            rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
-            colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-            df_frail <- rbind.data.frame(df_frail, rows_to_add)
-            
-            
-            
-            #b<-as.Date("2019-07-01")
-            print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_prop_Frail")+geom_line()+
-                    geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
-                    geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
-                                colour = NA) +
-                    geom_line(aes(x=date,y=prop_Frail,colour='prop_Frail_data'))+
-                    theme_bw(base_size = 12, base_family = "Helvetica")+
-                    theme(legend.position="right")+ylab("")+xlab("")+
-                    scale_color_manual(values = c("Fit_to_data" = "blue",
-                                                  "prop_Frail_data" = "red",
-                                                  "Predicted_prop_Frail" = "black"))+
-                    ggtitle(paste("Frailty",ad,age, d )))
-          }
-        }
-        
-        if(forecast_cc == TRUE){
-          
-          icd_age <- paste(d, age, sep = "-")
-          
-          if(icd_age %in% cc_icd_ages){
-            
-            
-            if(!any(grepl("prop_cc",colnames(temp)))){
-              temp$prop_Frail <- temp$cc / temp$Admissions
-            }
-            
-            
-            
+            # large number of admissions
+            # 
             if(diagnostics_only == TRUE){
-              Train<-temp[,c("date","prop_cc")]
+              Train<-temp[,c("date","Admissions")]
             }else{
-              Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc")]
+              Train<-temp[temp$date<as.Date(train_date),c("date","Admissions")]
             }
             Train<-Train[order(Train$date),]
             a1 <- matrix(c(0,0),2, 1)
             P1 <- matrix(0, 2, 2)
             P1inf <- diag(2)
             
-            m<-as.formula('prop_cc~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                           SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
+
+            m<-as.formula('Admissions~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
+                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
             
             model <- SSModel(m,H = matrix(NA),
                              data=Train)
-            print("Proportion CC")
+            
             
             fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
             
@@ -520,32 +198,33 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
             Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
             
-            if(diagnostics_only == TRUE){
-              diagnostics_function(Train, metric = "Proportion cc", out,
-                                   title_name = paste(d,age,ad) )
-            }
+            ###################################################################
+            ## Diagnostics for admissions #####################################
+            ###################################################################
             
+            if(diagnostics_only == TRUE){
+            
+            diagnostics_function(Train, metric = "Admissions", out,
+                                 title_name = paste(d,age,ad) )
+            }
+              
             if(diagnostics_only == FALSE){
-              ## First we calculate the difference in weeks between the last date of our data 
-              ## and then the date we wish to forecast from 
               forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
-                                                  strptime(max(Train$date), format = "%Y-%m-%d"),units="weeks")
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"), units="weeks")
               tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
               forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
               forecast_weeks <- forecast_weeks[-1]
-              pred_admi <- temp[temp$date > max(Train$date), "prop_cc"]
-              ## This double checks there isn't any that overlap from our forecast, if there aren't
-              ## which we expect, this is the difference between our forecast date and our end date 
-              ## plus the length of time we want to forecast forward in weeks 
-              if(length(pred_admi) < length(forecast_weeks))
+              pred_admi <- temp[temp$date > max(Train$date), 'Admissions']
+              
+              
+              if(length(pred_admi) < length(forecast_weeks)){
                 pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
-              
-              
+              }
               tot_dates <- c(Train$date, forecast_weeks)
-              tot_ad <- c(Train[,"prop_cc"], pred_admi)#
+              tot_ad <- c(Train$Admissions, pred_admi)
               
               df <- cbind.data.frame(tot_dates, tot_ad)
-              colnames(df) <- c("date","prop_cc")#
+              colnames(df) <- c("date","Admissions")
               df<-df[order(df$date),]
               df$signal<-NA
               df[df$date <= max(Train$date),'signal']<-Train$predicted
@@ -568,79 +247,373 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               df$lwr<-NA
               df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
               
+                pred_dates <- df$date[df$date>max(Train$date)]
+                patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
+                rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
+                colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
+                df_preds <- rbind.data.frame(df_preds, rows_to_add)
+                
+              
+              
+              print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_admission")+geom_line()+
+                      geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
+                      geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.35, colour = NA
+                      ) +
+                      geom_line(aes(x=date,y=Admissions,colour='Admissions_actual'))+
+                      theme_bw(base_size = 12, base_family = "Helvetica")+
+                      theme(legend.position="right")+ylab("")+xlab("")+ labs(colour = "Legend") +
+                      scale_color_manual(values = c("Fit_to_data" = "blue",
+                                                    "Admissions_actual" = "red",
+                                                    "Predicted_admission" = "black"))+
+                      ggtitle(paste("Admissions",ad,d, age )))
+              
+            }
+            }
+            
+            if(forecast_wait == TRUE & ad == "Elective"){
+            
+              
+              
+              if(diagnostics_only == TRUE){
+                Train<-temp[,c("date",wait_time_col)]
+              }else{
+                Train<-temp[temp$date<as.Date(train_date),c("date",wait_time_col)]
+              }
+            Train<-Train[order(Train$date),]
+            a1 <- matrix(c(0,0),2, 1)
+            P1 <- matrix(0, 2, 2)
+            P1inf <- diag(2)
+            
+            formula_strings <- paste(wait_time_col, '~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
+                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)', sep = "")
+            
+            m<-as.formula(formula_strings)
+            
+            model <- SSModel(m,H = matrix(NA),
+                             data=Train)
+            print("Waiting time forecast")
+            
+            fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
+            
+            
+            out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
+            Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
+            
+            ###################################################################
+            ## Diagnostics ####################################################
+            ###################################################################
+            
+            if(diagnostics_only == TRUE){
+            
+            diagnostics_function(Train, metric = "Wait time", out,
+                                 title_name = paste(d,age,ad) )
+            }
+            if(diagnostics_only == FALSE){
+              forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"), units="weeks")
+              tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
+              forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
+              forecast_weeks <- forecast_weeks[-1]
+              
+              pred_admi <- temp[temp$date > max(Train$date), wait_time_col]
+              if(length(pred_admi) < length(forecast_weeks))
+                pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+              
+              tot_dates <- c(Train$date, forecast_weeks)
+              tot_ad <- c(Train[,wait_time_col], pred_admi)
+              df <- cbind.data.frame(tot_dates, tot_ad)
+              colnames(df) <- c("date","Wait_time")
+              df<-df[order(df$date),]
+              df$signal<-NA
+              df[df$date <= max(Train$date),'signal']<-Train$predicted
+              
+              
+              
+              n<-tot_period
+              
+              v<-var(residuals(out,type="response"))
+              newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+                                 SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
+              
+              pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
+                              states =c('all'), se.fit = FALSE, nsim = 1000, 
+                              maxiter = 52, filtered = TRUE)
+              pred<-as.data.frame(pred)
+              df$fit<-NA
+              df$upr<-NA
+              df$lwr<-NA
+              df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
+              
+              
+                
               pred_dates <- df$date[df$date>max(Train$date)]
               patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
               rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
               colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-              df_cc <- rbind.data.frame(df_cc, rows_to_add)
-              
-              
+              df_wait <- rbind.data.frame(df_wait, rows_to_add)
+                
               
               #b<-as.Date("2019-07-01")
-              print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_prop_cc")+geom_line()+
+              print(ggplot(data=df)+
+                      aes(x=date,y=fit, colour = "Predicted wait time")+
+                      geom_line()+
                       geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
                       geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
-                                  colour = NA) +
-                      geom_line(aes(x=date,y=prop_cc,colour='prop_cc_data'))+
+                                  linetype = 2, colour = NA) +
+                      geom_line(aes(x=date,y=df[,2],colour='Actual_WT_data'))+
                       theme_bw(base_size = 12, base_family = "Helvetica")+
                       theme(legend.position="right")+ylab("")+xlab("")+
                       scale_color_manual(values = c("Fit_to_data" = "blue",
-                                                    "prop_cc_data" = "red",
-                                                    "Predicted_prop_cc" = "black"))+
-                      ggtitle(paste("Straight to CC",ad,age, d )))
-            } 
-          }else{
-            
-            if(cohort3 == FALSE){
-              Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","epistart_week")]
-            }else{
-              Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","rttstart_week")]
+                                                    "Actual_WT_data" = "red",
+                                                    "Predicted wait time" = "black"))+
+                      ggtitle(paste("Waiting time",ad,age, d )))
             }
-            forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
-            forecast_weeks <- forecast_weeks[-1]
-            weeks_for_mean <- temp[temp$date < max(Train$date), ]
-            tot_dates <- c(Train$date, forecast_weeks)
-            
-            if(cohort3 == FALSE){
-              mean_vals <- aggregate(Train, by = list(Train$epistart_week), FUN = mean , na.rm = TRUE)$prop_cc
-              sd_vals <-  aggregate(Train, by = list(Train$epistart_week), FUN = sd , na.rm = TRUE)$prop_cc
-            }else{
-              mean_vals <- aggregate(Train, by = list(Train$rttstart_week), FUN = mean , na.rm = TRUE)$prop_cc
-              sd_vals <- aggregate(Train, by = list(Train$rttstart_week), FUN = sd , na.rm = TRUE)$prop_cc
             }
-            pred_dates <- tot_dates[tot_dates>max(Train$date)]
-            start_week <- Train[which.max(Train$date),which(colnames(Train) == "epistart_week" | colnames(Train) == "rttstart_week")] + 1
-            end_week <- start_week - 1
             
-            week_seq <- start_week
-            while(length(week_seq) != forecast_period){
-              next_week <- week_seq[length(week_seq)] + 1
-              if(next_week == 53){
-                next_week <- 1
-              }
-              week_seq <- append(week_seq, next_week)
+            if(forecast_frail == TRUE){
               
+            if(!any(grepl("prop_Frail",colnames(temp)))){
+              temp$prop_Frail <- temp$Frail / temp$Admissions
             }
             
+  
+              
+            if(diagnostics_only == TRUE){
+              Train<-temp[,c("date","prop_Frail")]
+            }else{
+              Train<-temp[temp$date<as.Date(train_date),c("date","prop_Frail")]
+            }
+            Train<-Train[order(Train$date),]
+            a1 <- matrix(c(0,0),2, 1)
+            P1 <- matrix(0, 2, 2)
+            P1inf <- diag(2)
             
-            pred_data_vals <- mean_vals[week_seq]
-            sd_data_vals <- sd_vals[week_seq]
+            m<-as.formula('prop_Frail~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
+                                         SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
             
-            patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
-            pred <- data.frame(matrix(ncol = 3, nrow = length(pred_dates), data = pred_data_vals))
-            pred[,2] <- pred[,1] - sd_data_vals
-            pred[,3] <- pred[,1] + sd_data_vals
+            model <- SSModel(m,H = matrix(NA),
+                             data=Train)
+            print("Proportion frail")
             
-            rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
-            colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-            df_cc <- rbind.data.frame(df_cc, rows_to_add)
+            fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
             
+            
+            out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
+            Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
+            
+            if(diagnostics_only == TRUE){
+            diagnostics_function(Train, metric = "Proportion frail", out,
+                                 title_name = paste(d,age,ad) )
+            }
+            
+            if(diagnostics_only == FALSE){
+              forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"), units="weeks")
+              tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
+              forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
+              forecast_weeks <- forecast_weeks[-1]
+              pred_admi <- temp[temp$date > max(Train$date), "prop_Frail"]
+              if(length(pred_admi) < length(forecast_weeks)){
+                pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+              }
+              tot_dates <- c(Train$date, forecast_weeks)
+              tot_ad <- c(Train[,"prop_Frail"], pred_admi)
+              df <- cbind.data.frame(tot_dates, tot_ad)
+              colnames(df) <- c("date","prop_Frail")
+              
+              df<-df[order(df$date),]
+              df$signal<-NA
+              df[df$date <= max(Train$date),'signal']<-Train$predicted
+              
+              
+              
+              n<-tot_period
+              
+              v<-var(residuals(out,type="response"))
+              newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+                                 SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
+              
+              pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
+                              states =c('all'), se.fit = FALSE, nsim = 1000, 
+                              maxiter = 52, filtered = TRUE)
+              pred<-as.data.frame(pred)
+              df$fit<-NA
+              df$upr<-NA
+              df$lwr<-NA
+              df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
+              
+                pred_dates <- df$date[df$date>max(Train$date)]
+                patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
+                rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
+                colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
+                df_frail <- rbind.data.frame(df_frail, rows_to_add)
+                
+              
+              
+              #b<-as.Date("2019-07-01")
+              print(ggplot(data=df)+
+                      aes(x=date,y=fit, colour = "Predicted_prop_Frail")+
+                      geom_line()+
+                      geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
+                      geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
+                                  colour = NA) +
+                      geom_line(aes(x=date,y=prop_Frail,colour='prop_Frail_data'))+
+                      theme_bw(base_size = 12, base_family = "Helvetica")+
+                      theme(legend.position="right")+ylab("")+xlab("")+
+                      scale_color_manual(values = c("Fit_to_data" = "blue",
+                                                    "prop_Frail_data" = "red",
+                                                    "Predicted_prop_Frail" = "black"))+
+                      ggtitle(paste("Frailty",ad,age, d )))
+            }
+            }
+            
+            if(forecast_cc == TRUE){
+              
+              icd_age <- paste(d, age, sep = "-")
+              
+              if(icd_age %in% cc_icd_ages){
+              
+              
+                if(!any(grepl("prop_cc",colnames(temp)))){
+                  temp$prop_Frail <- temp$cc / temp$Admissions
+                }
+                
+                
+                
+                if(diagnostics_only == TRUE){
+                  Train<-temp[,c("date","prop_cc")]
+                }else{
+                  Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc")]
+                }
+                Train<-Train[order(Train$date),]
+                a1 <- matrix(c(0,0),2, 1)
+                P1 <- matrix(0, 2, 2)
+                P1inf <- diag(2)
+                
+                m<-as.formula('prop_cc~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
+                                           SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
+                
+                model <- SSModel(m,H = matrix(NA),
+                                 data=Train)
+                print("Proportion CC")
+                
+                fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
+                
+                
+                out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
+                Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
+                
+                if(diagnostics_only == TRUE){
+                  diagnostics_function(Train, metric = "Proportion cc", out,
+                                       title_name = paste(d,age,ad) )
+                }
+                
+                if(diagnostics_only == FALSE){
+                  forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                      strptime(max(Train$date), format = "%Y-%m-%d"), units="weeks")
+                  tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
+                  forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
+                  forecast_weeks <- forecast_weeks[-1]
+                  pred_admi <- temp[temp$date > max(Train$date), "prop_cc"]
+                  if(length(pred_admi) < length(forecast_weeks))
+                    pred_admi <- c(pred_admi, rep(NA, length(forecast_weeks) - length(pred_admi)))
+                  
+                  tot_dates <- c(Train$date, forecast_weeks)
+                  tot_ad <- c(Train[,"prop_cc"], pred_admi)
+                  df <- cbind.data.frame(tot_dates, tot_ad)
+                  colnames(df) <- c("date","prop_cc")
+                  
+                  df<-df[order(df$date),]
+                  df$signal<-NA
+                  df[df$date <= max(Train$date),'signal']<-Train$predicted
+                  
+                  
+                  
+                  n<-tot_period
+                  
+                  v<-var(residuals(out,type="response"))
+                  newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
+                                     SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
+                  
+                  pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
+                                  states =c('all'), se.fit = FALSE, nsim = 1000, 
+                                  maxiter = 52, filtered = TRUE)
+                  pred<-as.data.frame(pred)
+                  df$fit<-NA
+                  df$upr<-NA
+                  df$lwr<-NA
+                  df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
+                  
+                  pred_dates <- df$date[df$date>max(Train$date)]
+                  patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
+                  rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
+                  colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
+                  df_cc <- rbind.data.frame(df_cc, rows_to_add)
+                  
+                  
+                  
+                  #b<-as.Date("2019-07-01")
+                  print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_prop_cc")+geom_line()+
+                          geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
+                          geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.45,
+                                      colour = NA) +
+                          geom_line(aes(x=date,y=prop_cc,colour='prop_cc_data'))+
+                          theme_bw(base_size = 12, base_family = "Helvetica")+
+                          theme(legend.position="right")+ylab("")+xlab("")+
+                          scale_color_manual(values = c("Fit_to_data" = "blue",
+                                                        "prop_cc_data" = "red",
+                                                        "Predicted_prop_cc" = "black"))+
+                          ggtitle(paste("Straight to CC",ad,age, d )))
+                } 
+              }else{
+                
+                if(cohort3 == FALSE){
+                  Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","epistart_week")]
+                }else{
+                  Train<-temp[temp$date<as.Date(train_date),c("date","prop_cc","rttstart_week")]
+                }
+                forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
+                forecast_weeks <- forecast_weeks[-1]
+                weeks_for_mean <- temp[temp$date < max(Train$date), ]
+                tot_dates <- c(Train$date, forecast_weeks)
+                
+                if(cohort3 == FALSE){
+                  mean_vals <- aggregate(Train, by = list(Train$epistart_week), FUN = mean , na.rm = TRUE)$prop_cc
+                  sd_vals <-  aggregate(Train, by = list(Train$epistart_week), FUN = sd , na.rm = TRUE)$prop_cc
+                }else{
+                  mean_vals <- aggregate(Train, by = list(Train$rttstart_week), FUN = mean , na.rm = TRUE)$prop_cc
+                  sd_vals <- aggregate(Train, by = list(Train$rttstart_week), FUN = sd , na.rm = TRUE)$prop_cc
+                }
+                pred_dates <- tot_dates[tot_dates>max(Train$date)]
+                start_week <- Train[which.max(Train$date),which(colnames(Train) == "epistart_week" | colnames(Train) == "rttstart_week")] + 1
+                end_week <- start_week - 1
+                
+                week_seq <- start_week
+                while(length(week_seq) != forecast_period){
+                  next_week <- week_seq[length(week_seq)] + 1
+                  if(next_week == 53){
+                    next_week <- 1
+                  }
+                  week_seq <- append(week_seq, next_week)
+                }
+                pred_data_vals <- mean_vals[week_seq]
+                sd_data_vals <- sd_vals[week_seq]
+                
+                patient_group <- rep(paste(ad,d,age, sep = "_"), length(pred_dates))
+                pred <- data.frame(matrix(ncol = 3, nrow = length(pred_dates), data = pred_data_vals))
+                pred[,2] <- pred[,1] - sd_data_vals
+                pred[,3] <- pred[,1] + sd_data_vals
+                
+                rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
+                colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
+                df_cc <- rbind.data.frame(df_cc, rows_to_add)
+                
+                
+              }
+            }
             
           }
-        }
-        
-      }
-    }}
+        }}
   
   dev.off()
   time_end <- Sys.time()
