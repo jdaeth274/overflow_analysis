@@ -187,6 +187,7 @@ times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data
                                             forecast_WT = TRUE, forecast_frail = TRUE,
                                             cutoff_dates = cutoff_dates)
 
+
 saveRDS(times_series_forecasts, here::here("time_series_forecasts", "time_series_forecasts.Rds"))
 
 
@@ -336,10 +337,11 @@ calculate_unitcosts(full_mergedcosts,
 
 # Length of stay frequency tables -----------------------------------------
 
+
+## 1. Patients leaving hospital after x number of days based on ICD, age and the ward they were admitted to
 source("src/los_freq_tables.R")
 
-# Take only 1 year of data (11-12 in this case)
-los_data <- select(transitions_data, c("GA_LoS", "cc_LoS", "admimeth_C", "ICD",
+los_data <- select(transitions_data, c("GA_LoS", "cc_LoS", "admimeth_C", "ICD", "cc",
                                "agegrp_v3", "cc_start_flg","cohort","Total_LoS"))
 
 ## discard negative values LoS and limit to <= 75
@@ -419,6 +421,68 @@ df_list <- list("all_emergency_count" = cut_off_emerg[[1]], "all_emergency_prop"
 write.xlsx(df_list, file = here::here("los_distribution", "totalLoS_episodes_2015-2020.xlsx"))
 
 
+## 2. Patients leaving hospital within the first 4 days once arriving in a ward based on ICD, age 
+source("src/los_4_day_freq_tables.R")
+
+# Identify patients who have GA stay and those with CC stay 
+N_ga_4 <- subset(los_data, admimeth_C == 1 & !is.na(GA_LoS))
+E_ga_4 <- subset(los_data, admimeth_C == 2 & !is.na(GA_LoS))
+
+N_cc_4 <- subset(los_data, admimeth_C == 1 & cc == 1 & !is.na(cc_LoS))
+E_cc_4 <- subset(los_data, admimeth_C == 2 & cc == 1 & !is.na(cc_LoS))
+
+## subset the GA & CC data for first 4 days only
+N_ga_4 <- subset(N_ga_4, GA_LoS >= 0 & GA_LoS <= 4)
+E_ga_4 <- subset(E_ga_4, GA_LoS >= 0 & GA_LoS <= 4)
+
+N_cc_4 <- subset(N_cc_4, cc_LoS >= 0 & cc_LoS <= 4)
+E_cc_4 <- subset(E_cc_4, cc_LoS >= 0 & cc_LoS <= 4)
+
+
+# frequency and proportion tables for each category
+# All electives
+
+# Elective patients  G&A
+count_N_ga_4 <- as.data.frame.matrix(table(N_ga_4$GA_LoS, N_ga_4$ptgrp))
+aggregated_dfs_elec_GA_4 <- make_prop(count_N_ga_4)
+
+# Emergency patients G&A
+count_E_ga_4 <- as.data.frame.matrix(table(E_ga_4$GA_LoS, E_ga_4$ptgrp))
+aggregated_dfs_emerg_GA_4 <- make_prop(count_E_ga_4)
+
+# Elective patients CC
+count_N_cc_4 <- as.data.frame.matrix(table(N_cc_4$cc_LoS, N_cc_4$ptgrp))
+aggregated_dfs_elec_CC_4 <- make_prop(count_N_cc_4)
+
+# Emergency patients CC
+count_E_cc_4 <- as.data.frame.matrix(table(E_cc_4$cc_LoS, E_cc_4$ptgrp))
+aggregated_dfs_emerg_CC_4 <- make_prop(count_E_cc_4)
+
+
+
+###############################################################################
+## Simplify counts to remove those under 10 ###################################
+###############################################################################
+
+## Electives starting in G&A 
+cut_off_elec_GA_4 <- count_threshold(aggregated_dfs_elec_GA_4, cut_off = 10)
+
+## Emergencies starting in G&A
+cut_off_emerg_GA_4 <- count_threshold(aggregated_dfs_emerg_GA_4, cut_off = 10)
+
+## Electives starting in CC
+cut_off_elec_CC_4 <- count_threshold(aggregated_dfs_elec_CC_4, cut_off = 10)
+
+## Emergencies starting in CC
+cut_off_emerg_CC_4 <- count_threshold(aggregated_dfs_emerg_CC_4, cut_off = 10)
+
+
+df_list_4 <- list("emergency_ga_count" = cut_off_emerg_GA_4[[1]] ,"emergency_ga_prop" = cut_off_emerg_GA_4[[2]],
+                "emergency_cc_count" = cut_off_emerg_CC_4[[1]], "emergency_cc_prop" = cut_off_emerg_CC_4[[2]],
+                "elective_ga_count" = cut_off_elec_GA_4[[1]], "elective_ga_prop" = cut_off_elec_GA_4[[2]],
+                "elective_cc_count" = cut_off_elec_CC_4[[1]], "elective_cc_prop" = cut_off_elec_CC_4[[2]])
+
+write.xlsx(df_list_4, here::here("los_distribution", "totalLoS_4day_episodes_2015-2020.xlsx"))
 
 
 

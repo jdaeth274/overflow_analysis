@@ -154,7 +154,6 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
   }else{
     icds_to_look_at <- unique(ts_data$ICD)
   }
-  
   for ( age in unique(ts_data$agegrp_v3)){
       for (d in icds_to_look_at){
           cat("On group number:", current_group)
@@ -394,7 +393,6 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
             model <- SSModel(m,H = matrix(NA),
                              data=Train)
             print("Proportion frail")
-            
             fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
             
             
@@ -588,8 +586,17 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
                 start_week <- Train[which.max(Train$date),which(colnames(Train) == "epistart_week" | colnames(Train) == "rttstart_week")] + 1
                 end_week <- start_week - 1
                 
+                
+                forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                    strptime(max(Train$date), format = "%Y-%m-%d"), units="weeks")
+                tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
+                forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
+                forecast_weeks <- forecast_weeks[-1]
+                tot_dates <- c(Train$date, forecast_weeks)
+                pred_dates <- forecast_weeks
+                
                 week_seq <- start_week
-                while(length(week_seq) != forecast_period){
+                while(length(week_seq) != tot_period){
                   next_week <- week_seq[length(week_seq)] + 1
                   if(next_week == 53){
                     next_week <- 1
@@ -623,7 +630,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
 }
 
 forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
-                              admit_type = "Emergency",
+                              admit_type = "Emergency", diagnostics_only = FALSE,
                               train_date = "2012-01-01",
                               forecast_period = 52, cutoff_dates){
   
@@ -671,8 +678,7 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
   ages_tot <- unique(ts_data$agegrp_v3)
   icds_tot <- unique(ts_data$ICD)
   
-  
-  for(age in ages_tot){
+  for(age in ages_tot){ 
     for(icd in icds_tot){
       cat("On group number for bundle prop:", current_group)
           print(paste("age icd:",agers_icders[current_group]))
@@ -686,96 +692,99 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
           nas_check <- which(is.na(temp$prop_bundle))
           if(length(nas_check) > 0)
             temp <- temp[-nas_check,]
-          
-          
-          test<-sum(temp$prop_bundle<0)>10
-          if (test){
+
             
             #ggplot(temp)+ aes(x=date,y=Admissions,colour=as.factor(agegrp_v2))+geom_line()
             
             # large number of admissions
-            # 
-            Train<-temp[temp$date<as.Date(train_date),c("date","prop_bundle")]
-            Train<-Train[order(Train$date),]
+            # #
+            if(diagnostics_only == TRUE){
+              Train <- temp[order(temp$date), c("date", "prop_bundle")]
+            }else{
+              Train<-temp[temp$date<as.Date(train_date),c("date","prop_bundle")]
+              Train<-Train[order(Train$date),]
+            }
+          
             a1 <- matrix(c(0,0),2, 1)
             P1 <- matrix(0, 2, 2)
             P1inf <- diag(2)
             
 
-            m<-as.formula('prop_bundle~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
+            m<-as.formula('prop_bundle~SSMseasonal(period = 52.18, sea.type = "trigonometric")')
             
             model <- SSModel(m,H = matrix(NA),
                              data=Train)
             
             
             fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
-            
-            
             out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
-            Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
+            Train$predicted <-as.numeric(signal(out)$signal)
             
             ###################################################################
             ## Diagnostics for admissions #####################################
             ###################################################################
             
-            
-              
-              forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
-              forecast_weeks <- forecast_weeks[-1]
-              pred_admi <- temp[temp$date > max(Train$date), 'prop_bundle']
-              if(length(pred_admi) < length(forecast_weeks))
-                pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
-              
-              tot_dates <- c(Train$date, forecast_weeks)
-              tot_ad <- c(Train$prop_bundle, pred_admi)
-              
-              df <- cbind.data.frame(tot_dates, tot_ad)
-              colnames(df) <- c("date","prop_bundle")
-              df<-df[order(df$date),]
-              df$signal<-NA
-              df[df$date <= max(Train$date),'signal']<-Train$predicted
-              
-              
-              
-              n<-forecast_period
-              
-              
-              v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
-                                 SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
-              
-              pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
-                              states =c('all'), se.fit = FALSE, nsim = 1000, 
-                              maxiter = 52, filtered = TRUE)
-              pred<-as.data.frame(pred)
-              df$fit<-NA
-              df$upr<-NA
-              df$lwr<-NA
-              df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
-              
-                pred_dates <- df$date[df$date>max(Train$date)]
-                patient_group <- rep(paste(ad,icd,age, sep = "_"), length(pred_dates))
-                rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
-                colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-                df_preds <- rbind.data.frame(df_preds, rows_to_add)
+            if(diagnostics_only == TRUE){
+              diagnostics_function(Train, metric = "Proportion bundle", out, title_name = paste("Proportion bundle", icd, age))
+            }else{
+                 forecast_start_data_end <- difftime(strptime(train_date, format = "%Y-%m-%d"),
+                                                  strptime(max(Train$date), format = "%Y-%m-%d"), units="weeks")
+                tot_period <- (floor(forecast_start_data_end) - 1) + forecast_period
+                forecast_weeks <- seq(max(Train$date), length.out = tot_period + 1, by  = 'weeks')
+                forecast_weeks <- forecast_weeks[-1]
+  
+                pred_admi <- temp[temp$date > max(Train$date), 'prop_bundle']
+                if(length(pred_admi) < length(forecast_weeks)){
+                  pred_admi <- c(pred_admi, rep(NA, (length(forecast_weeks) - length(pred_admi))))
+                }
+                tot_dates <- c(Train$date, forecast_weeks)
+                tot_ad <- c(Train$prop_bundle, pred_admi)
                 
-              
-              
-              print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_prop_bundle")+geom_line()+
-                      geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
-                      geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.35, colour = NA
-                      ) +
-                      geom_line(aes(x=date,y=prop_bundle,colour='prop_bundle_actual'))+
-                      theme_bw(base_size = 12, base_family = "Helvetica")+
-                      theme(legend.position="right")+ylab("")+xlab("")+ labs(colour = "Legend") +
-                      scale_color_manual(values = c("Fit_to_data" = "blue",
-                                                    "prop_bundle_actual" = "red",
-                                                    "Predicted_prop_bundle" = "black"))+
-                      ggtitle(paste("prop_bundle:",icd, age)))
-              
-            
+                df <- cbind.data.frame(tot_dates, tot_ad)
+                colnames(df) <- c("date","prop_bundle")
+                df<-df[order(df$date),]
+                df$signal<-NA
+                df[df$date <= max(Train$date),'signal']<-Train$predicted
+                
+                
+                
+                n<-tot_period
+                
+                
+                v<-var(residuals(out,type="response"))
+                newdata<-SSModel(rep(NA,tot_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric"))
+                
+                pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
+                                states =c('all'), se.fit = FALSE, nsim = 1000, 
+                                maxiter = 52, filtered = TRUE)
+                pred<-as.data.frame(pred)
+                df$fit<-NA
+                df$upr<-NA
+                df$lwr<-NA
+                df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
+                
+                  pred_dates <- df$date[df$date>max(Train$date)]
+                  patient_group <- rep(paste(ad,icd,age, sep = "_"), length(pred_dates))
+                  rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
+                  colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
+                  df_preds <- rbind.data.frame(df_preds, rows_to_add)
+                  
+                
+                
+                print(ggplot(data=df)+aes(x=date,y=fit, colour = "Predicted_prop_bundle")+geom_line()+
+                        geom_line(aes(x=date,y=signal,colour='Fit_to_data'))+
+                        geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "grey70", alpha = 0.35, colour = NA
+                        ) +
+                        geom_line(aes(x=date,y=prop_bundle,colour='prop_bundle_actual'))+
+                        theme_bw(base_size = 12, base_family = "Helvetica")+
+                        theme(legend.position="right")+ylab("")+xlab("")+ labs(colour = "Legend") +
+                        scale_color_manual(values = c("Fit_to_data" = "blue",
+                                                      "prop_bundle_actual" = "red",
+                                                      "Predicted_prop_bundle" = "black"))+
+                        ggtitle(paste("prop_bundle:",icd, age)))
             }
+            
+            
           
       
       
@@ -784,11 +793,14 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
   }
   }
   
+  dev.off()
+  
+  if(diagnostics_only == FALSE){
   if(admit_type == "Emergency")
     df_preds$cohort <- 3
   else
     df_preds$cohort <- 1
-  
+  }
   return(df_preds)
   
   
@@ -837,7 +849,7 @@ log_transform <- function(vector_vals, inverse = FALSE){
 
 running_forecasts <- function(total_cohort_data, train_date, forecast_period, single_icd = NULL, base_dir, icd_ages_cc = NULL,
                               run_admis = TRUE, forecast_cc = TRUE, forecast_admis = TRUE, forecast_WT = TRUE,
-                              forecast_frail = TRUE, cutoff_dates){
+                              forecast_frail = TRUE, cutoff_dates, diagnostics_only = FALSE){
   #library(tidyverse)
   #library(ggplot2)
   #library(lubridate)
@@ -858,8 +870,8 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_3_plots <- paste(base_dir,"cohort_3_admissions_and_frail.pdf", sep = "")
   cohort_1_med_plot <- paste(base_dir, "cohort_1_pool_and_median_WT.pdf",sep = "")
   cohort_1_mean_plot <- paste(base_dir, "cohort_1_frail_and_mean_WT.pdf",sep = "")
-  cohort_1_prop_plots <- paste(base_dir, "cohort_1_bundled_proportion", sep = "")
-  cohort_3_prop_plots <- paste(base_dir, "cohort_3_bundled_proportion", sep = "")
+  cohort_1_prop_plots <- paste(base_dir, "cohort_1_bundled_proportion.pdf", sep = "")
+  cohort_3_prop_plots <- paste(base_dir, "cohort_3_bundled_proportion.pdf", sep = "")
   
   cohort1_med_nonzero <- which(cohort_1_ts_admissions$p50_WT_ICDc != 0  )
   cohort1_mean_nonzero <- which(cohort_1_ts_admissions$mean_WT_ICDc != 0)
@@ -867,9 +879,13 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort1_cc_nonzero <- which(cohort_1_ts_admissions$prop_cc != 0 & cohort_1_ts_admissions$prop_cc != 1)
   cohort3_frail_nonzero <- which(cohort_3_ts$prop_Frail != 0 & cohort_3_ts$prop_Frail != 1)
   cohort3_cc_nonzero <- which(cohort_3_ts$prop_cc != 0 & cohort_3_ts$prop_cc != 1)
-  cohort_1_bundle_nonzero <- which(cohort_1_prop_bundles$prop_bundle != 0 | !(is.na(cohort_1_prop_bundles$prop_bundle)))
-  cohort_3_bundle_nonzero <- which(cohort_3_prop_bundles$prop_bundle != 0 | !(is.na(cohort_3_prop_bundles$prop_bundle)))
   
+  cohort_1_bundle_nonzero <- which(!(is.na(cohort_1_prop_bundles$prop_bundle) & cohort_1_prop_bundles$prop_bundle != 0 & cohort_1_prop_bundles$prop_bundle != 1))
+  cohort_3_bundle_nonzero <- which(!(is.na(cohort_3_prop_bundles$prop_bundle) & cohort_3_prop_bundles$prop_bundle != 0 & cohort_3_prop_bundles$prop_bundle != 1))
+  
+  pool_elec_non_zero <- which(cohort_1_ts_admissions$Admissions != 0 & !(is.na(cohort_1_ts_admissions$Admissions)))
+  cohort_1_ts_admissions$Admissions[pool_elec_non_zero] <- log(cohort_1_ts_admissions$Admissions[pool_elec_non_zero])
+  cohort_1_ts_admissions$Admissions[-pool_elec_non_zero] <- 1
   
   cohort_1_ts_admissions$p50_WT_ICDc[cohort1_med_nonzero] <- log(cohort_1_ts_admissions$p50_WT_ICDc[cohort1_med_nonzero])
   cohort_1_ts_admissions$mean_WT_ICDc[cohort1_mean_nonzero] <- log(cohort_1_ts_admissions$mean_WT_ICDc[cohort1_mean_nonzero])
@@ -878,14 +894,19 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_1_ts_admissions$prop_cc[-cohort1_cc_nonzero] <- 0.0001 
   cohort_1_ts_admissions$prop_cc <- log_transform(cohort_1_ts_admissions$prop_cc)
   
+  cohort_1_ts_admissions$p50_WT_ICDc[-cohort1_med_nonzero] <- 1
+  cohort_1_ts_admissions$mean_WT_ICDc[-cohort1_mean_nonzero] <- 1
   
   cohort_3_ts$prop_Frail[-cohort3_frail_nonzero] <- 0.0001
   cohort_3_ts$prop_Frail <- log_transform(cohort_3_ts$prop_Frail)
   cohort_3_ts$prop_cc[-cohort3_cc_nonzero] <- 0.0001 
   cohort_3_ts$prop_cc <- log_transform(cohort_3_ts$prop_cc)
   
-  cohort_1_prop_bundles$prop_bundle[cohort_1_bundle_nonzero] <- log(cohort_1_prop_bundles$prop_bundle[cohort_1_bundle_nonzero])
-  cohort_3_prop_bundles$prop_bundle[cohort_3_bundle_nonzero] <- log(cohort_3_prop_bundles$prop_bundle[cohort_3_bundle_nonzero])
+  cohort_1_prop_bundles$prop_bundle[-cohort_1_bundle_nonzero] <- 0.0001
+  cohort_3_prop_bundles$prop_bundle[-cohort_3_bundle_nonzero] <- 0.0001
+  
+  cohort_1_prop_bundles$prop_bundle <- log_transform(cohort_1_prop_bundles$prop_bundle)
+  cohort_3_prop_bundles$prop_bundle <- log_transform(cohort_3_prop_bundles$prop_bundle)
   
   if(length(icd_ages_cc) == 0){
    icd_ages_cc_cohort1 <- c("2-2","2-3","9-2","9-3","11-2","13-2","13-3","19-2","19-3","21-2","50-2")
@@ -894,7 +915,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   if(run_admis){
   print("Running Emergencies")
   test_cohort_3 <- forecast_function(cohort_3_ts, results_name = cohort_3_plots,
-                                     forecast_admissions = forecast_admis, diagnostics_only = FALSE, forecast_frail = forecast_frail,
+                                     forecast_admissions = forecast_admis, diagnostics_only = diagnostics_only, forecast_frail = forecast_frail,
                                      forecast_cc = forecast_cc, cc_icd_ages = icd_ages_cc_cohort3,
                                      admit_type = "Emergency",
                                      train_date = train_date,
@@ -904,7 +925,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   test_cohort_1_new_median <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_med_plot,
                                          forecast_admissions = forecast_admis, forecast_frail = forecast_frail,
                                          forecast_wait = forecast_WT, forecast_cc = forecast_cc, cc_icd_ages = icd_ages_cc_cohort1,
-                                         admit_type = "Elective", cohort3 = TRUE,
+                                         admit_type = "Elective", diagnostics_only = diagnostics_only, cohort3 = TRUE,
                                          wait_time_col = "p50_WT_ICDc", train_date = train_date,
                                          forecast_period = forecast_period,
                                          only_ICD = single_icd, cutoff_dates = cutoff_dates)
@@ -912,20 +933,20 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   test_cohort_1_new_mean <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_mean_plot,
                                               forecast_admissions = forecast_admis, forecast_wait = forecast_WT, forecast_frail = forecast_frail,
                                          admit_type = "Elective", cohort3 = TRUE,
-                                         wait_time_col = "mean_WT_ICDc", diagnostics_only = FALSE,
+                                         wait_time_col = "mean_WT_ICDc", diagnostics_only = diagnostics_only,
                                          train_date = train_date, only_ICD = single_icd,
                                          forecast_period = forecast_period, cutoff_dates = cutoff_dates)
   }
   print("Running Elective prop bundle")
   cohort_1_prop_bundle_forecast <- forecast_bundle_makeup(ts_data = cohort_1_prop_bundles,
-                                                          admit_type = "Elective",
+                                                          admit_type = "Elective", diagnostics_only = diagnostics_only,
                                                           results_name = cohort_1_prop_plots,
                                                           forecast_period = forecast_period,
                                                           train_date = train_date, cutoff_dates = cutoff_dates)
   print("Running Emergency prop bundle")
   cohort_3_prop_bundle_forecast <- forecast_bundle_makeup(ts_data = cohort_3_prop_bundles,
                                                           results_name = cohort_3_prop_plots,
-                                                          admit_type = "Emergency",
+                                                          admit_type = "Emergency", diagnostics_only = diagnostics_only,
                                                           forecast_period = forecast_period,
                                                           train_date = train_date, cutoff_dates = cutoff_dates)
   
@@ -957,10 +978,10 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
     cohort_3_cc <- forecast_clean(cohort_3_cc, cohort_num = 3, transformed_log = TRUE)
   }
   
-  cohort_3_prop_bundle_forecast <- forecast_clean(cohort_3_prop_bundle_forecast, cohort_num = 3, transformed = TRUE)
+  cohort_3_prop_bundle_forecast <- forecast_clean(cohort_3_prop_bundle_forecast, cohort_num = 3, transformed_log = TRUE)
   
   if(forecast_admis){
-    cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 1)
+    cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 1, transformed = TRUE)
   }
   if(forecast_WT){
     cohort_1_median_wait <- forecast_clean(cohort_1_median_wait, cohort_num = 1, transformed = TRUE)
@@ -972,7 +993,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   if(forecast_cc){
     cohort_1_cc <- forecast_clean(cohort_1_cc, cohort_num = 1, transformed_log = TRUE)
   }
-  cohort_1_prop_bundle_forecast <- forecast_clean(cohort_1_prop_bundle_forecast, cohort_num = 1, transformed = TRUE)
+  cohort_1_prop_bundle_forecast <- forecast_clean(cohort_1_prop_bundle_forecast, cohort_num = 1, transformed_log  = TRUE)
   
   cat("Done", "\n")
   end_time <- Sys.time()
