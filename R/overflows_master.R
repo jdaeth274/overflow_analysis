@@ -83,11 +83,11 @@ regression_results <- list(elective_dat, emergency_dat, failure_func[[3]])
 ## time_series ##
 time_series_data <- time_series_creator(hes_data = transitions_data, num_cores = core_nums, forecast_date = forecast_start_date,
                                         emergency_run = TRUE, elective_ts = TRUE, forecast_cutoff = forecast_start_date)
-
+source(file = "./Rscript/R/time_series_forecast.R")
 times_series_forecasts <- running_forecasts(total_cohort_data = time_series_data, train_date = as.Date(forecast_start_date),
-                                       forecast_period = 78,  base_dir = "./",
-                                       run_admis = TRUE, forecast_admis = TRUE, forecast_WT = TRUE, forecast_frail = TRUE,
-                                       cutoff_dates = cutoff_dates)
+                                       forecast_period = 78,  base_dir = "./JOSH/HF_out_data/imperial_forecasts/seasonsal_prop_bundles_",
+                                       run_admis = FALSE, forecast_admis = FALSE, forecast_WT = FALSE, forecast_frail = FALSE,
+                                       cutoff_dates = cutoff_dates, run_diags = FALSE, forecast_cc = FALSE)
 
 ## costs ##
 

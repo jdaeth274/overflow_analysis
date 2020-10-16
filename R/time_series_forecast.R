@@ -4,6 +4,7 @@
 
 diagnostics_function <- function(train_data, metric, out, title_name){
   library(ggpubr)  
+  title_name <- paste(metric, title_name)
   train_data$one.step.res.std<-as.numeric(rstandard(out,type='recursive'))
   
   admis <- ggplot(train_data)+aes(x=date,y=train_data[,2], colour = "blue")+geom_line()+
@@ -178,18 +179,20 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               Train<-temp[temp$date<as.Date(train_date),c("date","Admissions")]
             Train<-Train[order(Train$date),]
             a1 <- matrix(c(0,0),2, 1)
-            P1 <- matrix(0, 2, 2)
-            P1inf <- diag(2)
+            #P1 <- matrix(0, 2, 2)
+            P1 <- diag(10,2)
+            P1inf <- matrix(0,2,2)
+            #P1inf <- diag(2)
             
 
             m<-as.formula('Admissions~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
+                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1 = P1)')
             
             model <- SSModel(m,H = matrix(NA),
                              data=Train)
             
             
-            fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
+            fit <- fitSSM(model, inits = c(0,0),method = "BFGS")
             
             
             out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
@@ -279,19 +282,24 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
               
             Train<-Train[order(Train$date),]
             a1 <- matrix(c(0,0),2, 1)
-            P1 <- matrix(0, 2, 2)
-            P1inf <- diag(2)
+            #P1 <- matrix(0, 2, 2)
+            P1 <- diag(10,2)
+            P1inf <- matrix(0,2,2)
+            #P1inf <- diag(2)
             
             formula_strings <- paste(wait_time_col, '~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)', sep = "")
+                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1 = P1)', sep = "")
             
             m<-as.formula(formula_strings)
+            
+            
             
             model <- SSModel(m,H = matrix(NA),
                              data=Train)
             print("Waiting time forecast")
+            #inits = c(1.,1.) initial
             
-            fit <- fitSSM(model, inits = c(1.,1.),method = "BFGS")
+            fit <- fitSSM(model, inits = c(0,0),method = "BFGS")
             
             
             out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
@@ -626,7 +634,7 @@ forecast_function <- function(ts_data, results_name = "results.pdf",
 forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
                               admit_type = "Emergency",
                               train_date = "2012-01-01",
-                              forecast_period = 52, cutoff_dates){
+                              forecast_period = 52, cutoff_dates, run_diagnostic){
   
     if(admit_type == "Elective"){
       ts_data$date<-as.POSIXct( paste( 1, ts_data$rttstart_week, ts_data$rttstart_YYYY, sep = "-" ), format = "%u-%U-%Y",locale = "UK" ) 
@@ -676,6 +684,7 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
           print(paste("age icd:",agers_icders[current_group]))
           #print(paste("On group number:", current_group))
           current_group <- current_group + 1
+          
           temp<-ts_data[ts_data$agegrp_v3==age &
                        ts_data$ICD==icd,]
           temp <- temp[temp$date > as.Date(cutoff_dates[1]) &
@@ -686,22 +695,24 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
             temp <- temp[-nas_check,]
           
           
-          test<-sum(temp$prop_bundle<0)>10
-          if (test){
             
             #ggplot(temp)+ aes(x=date,y=Admissions,colour=as.factor(agegrp_v2))+geom_line()
             
             # large number of admissions
             # 
-            Train<-temp[temp$date<as.Date(train_date),c("date","prop_bundle")]
-            Train<-Train[order(Train$date),]
+            if(run_diagnostic){
+              Train <- temp[order(temp$date), c("date","prop_bundle")]
+            }else{
+              Train<-temp[temp$date<as.Date(train_date),c("date","prop_bundle")]
+              Train<-Train[order(Train$date),]
+            }
             a1 <- matrix(c(0,0),2, 1)
             P1 <- matrix(0, 2, 2)
             P1inf <- diag(2)
             
 
-            m<-as.formula('prop_bundle~SSMseasonal(period = 52.18, sea.type = "trigonometric") +
-                                       SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
+            m<-as.formula('prop_bundle~SSMseasonal(period = 52.18, sea.type = "trigonometric") ')#+
+                                       #SSMtrend(degree = 2, Q = list(NA,0),a1 = a1, P1inf = P1inf)')
             
             model <- SSModel(m,H = matrix(NA),
                              data=Train)
@@ -711,12 +722,17 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
             
             
             out <- KFS(fit$model,filtering='state',smoothing=c('state','disturbance','mean'))
-            Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
             
+            #Train$predicted <-as.numeric(signal(out, states = c('season','trend'), filtered=FALSE )$signal)
+            Train$predicted <-as.numeric(signal(out)$signal)
             ###################################################################
             ## Diagnostics for admissions #####################################
             ###################################################################
+            if(run_diagnostic){
+              
+              diagnostics_function(Train, "prop_bundle", out, paste("Prop_bundle",icd, age))
             
+              }else{
             
               
               forecast_weeks <- seq(max(Train$date), length.out = forecast_period + 1, by  = 'weeks')
@@ -740,8 +756,8 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
               
               
               v<-var(residuals(out,type="response"))
-              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric")+
-                                 SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
+              newdata<-SSModel(rep(NA,forecast_period)~SSMseasonal(period = 52.18, sea.type = "trigonometric"))#+
+                                 #SSMtrend(degree = 2,Q =as.list(fit$model$Q[1:2]) ),H = fit$model$H)
               
               pred <- predict(fit$model, newdata=newdata,  interval = c( "prediction"), level = 0.95, 
                               states =c('all'), se.fit = FALSE, nsim = 1000, 
@@ -752,11 +768,11 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
               df$lwr<-NA
               df[df$date>max(Train$date),c('fit','lwr','upr')]<-pred
               
-                pred_dates <- df$date[df$date>max(Train$date)]
-                patient_group <- rep(paste(ad,icd,age, sep = "_"), length(pred_dates))
-                rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
-                colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
-                df_preds <- rbind.data.frame(df_preds, rows_to_add)
+              pred_dates <- df$date[df$date>max(Train$date)]
+              patient_group <- rep(paste(ad,icd,age, sep = "_"), length(pred_dates))
+              rows_to_add <- cbind.data.frame(patient_group, pred, pred_dates)
+              colnames(rows_to_add) <- c("patient_group","median","lower","upper","date")
+              df_preds <- rbind.data.frame(df_preds, rows_to_add)
                 
               
               
@@ -772,21 +788,26 @@ forecast_bundle_makeup <- function(ts_data, results_name = "bundle_results.pdf",
                                                     "Predicted_prop_bundle" = "black"))+
                       ggtitle(paste("prop_bundle:",icd, age)))
               
-            
             }
+          }
           
       
       
       
     
-  }
+  
   }
   
-  if(admit_type == "Emergency")
-    df_preds$cohort <- 3
-  else
-    df_preds$cohort <- 1
+  if(run_diagnostic){
+    df_preds <- NULL
+  }else{
   
+    if(admit_type == "Emergency")
+      df_preds$cohort <- 3
+    else
+      df_preds$cohort <- 1
+  }
+  dev.off()
   return(df_preds)
   
   
@@ -835,7 +856,7 @@ log_transform <- function(vector_vals, inverse = FALSE){
 
 running_forecasts <- function(total_cohort_data, train_date, forecast_period, single_icd = NULL, base_dir, icd_ages_cc = NULL,
                               run_admis = TRUE, forecast_cc = TRUE, forecast_admis = TRUE, forecast_WT = TRUE,
-                              forecast_frail = TRUE, cutoff_dates){
+                              forecast_frail = TRUE, cutoff_dates, run_diags = FALSE){
   #library(tidyverse)
   library(ggplot2)
   library(lubridate)
@@ -856,8 +877,8 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_3_plots <- paste(base_dir,"cohort_3_admissions_and_frail.pdf", sep = "")
   cohort_1_med_plot <- paste(base_dir, "cohort_1_pool_and_median_WT.pdf",sep = "")
   cohort_1_mean_plot <- paste(base_dir, "cohort_1_frail_and_mean_WT.pdf",sep = "")
-  cohort_1_prop_plots <- paste(base_dir, "cohort_1_bundled_proportion", sep = "")
-  cohort_3_prop_plots <- paste(base_dir, "cohort_3_bundled_proportion", sep = "")
+  cohort_1_prop_plots <- paste(base_dir, "cohort_1_bundled_proportion.pdf", sep = "")
+  cohort_3_prop_plots <- paste(base_dir, "cohort_3_bundled_proportion.pdf", sep = "")
   
   cohort1_med_nonzero <- which(cohort_1_ts_admissions$p50_WT_ICDc != 0  )
   cohort1_mean_nonzero <- which(cohort_1_ts_admissions$mean_WT_ICDc != 0)
@@ -865,8 +886,8 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort1_cc_nonzero <- which(cohort_1_ts_admissions$prop_cc != 0 & cohort_1_ts_admissions$prop_cc != 1)
   cohort3_frail_nonzero <- which(cohort_3_ts$prop_Frail != 0 & cohort_3_ts$prop_Frail != 1)
   cohort3_cc_nonzero <- which(cohort_3_ts$prop_cc != 0 & cohort_3_ts$prop_cc != 1)
-  cohort_1_bundle_nonzero <- which(cohort_1_prop_bundles$prop_bundle != 0 | !(is.na(cohort_1_prop_bundles$prop_bundle)))
-  cohort_3_bundle_nonzero <- which(cohort_3_prop_bundles$prop_bundle != 0 | !(is.na(cohort_3_prop_bundles$prop_bundle)))
+  cohort_1_bundle_nonzero <- which(cohort_1_prop_bundles$prop_bundle != 0 & !(is.na(cohort_1_prop_bundles$prop_bundle)) & (cohort_1_prop_bundles$prop_bundle != 1))
+  cohort_3_bundle_nonzero <- which(cohort_3_prop_bundles$prop_bundle != 0 & !(is.na(cohort_3_prop_bundles$prop_bundle)) & (cohort_3_prop_bundles$prop_bundle != 1))
   
   
   cohort_1_ts_admissions$p50_WT_ICDc[cohort1_med_nonzero] <- log(cohort_1_ts_admissions$p50_WT_ICDc[cohort1_med_nonzero])
@@ -882,8 +903,10 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   cohort_3_ts$prop_cc[-cohort3_cc_nonzero] <- 0.0001 
   cohort_3_ts$prop_cc <- log_transform(cohort_3_ts$prop_cc)
   
-  cohort_1_prop_bundles$prop_bundle[cohort_1_bundle_nonzero] <- log(cohort_1_prop_bundles$prop_bundle[cohort_1_bundle_nonzero])
-  cohort_3_prop_bundles$prop_bundle[cohort_3_bundle_nonzero] <- log(cohort_3_prop_bundles$prop_bundle[cohort_3_bundle_nonzero])
+  cohort_1_prop_bundles$prop_bundle[-cohort_1_bundle_nonzero] <- 0.0001
+  cohort_3_prop_bundles$prop_bundle[-cohort_3_bundle_nonzero] <- 0.0001
+  cohort_1_prop_bundles$prop_bundle <- log_transform(cohort_1_prop_bundles$prop_bundle)
+  cohort_3_prop_bundles$prop_bundle <- log_transform(cohort_3_prop_bundles$prop_bundle)
   
   if(length(icd_ages_cc) == 0){
    icd_ages_cc_cohort1 <- c("2-2","2-3","9-2","9-3","11-2","13-2","13-3","19-2","19-3","21-2","50-2")
@@ -892,7 +915,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   if(run_admis){
   print("Running Emergencies")
   test_cohort_3 <- forecast_function(cohort_3_ts, results_name = cohort_3_plots,
-                                     forecast_admissions = forecast_admis, diagnostics_only = FALSE, forecast_frail = forecast_frail,
+                                     forecast_admissions = forecast_admis, diagnostics_only = run_diags, forecast_frail = forecast_frail,
                                      forecast_cc = forecast_cc, cc_icd_ages = icd_ages_cc_cohort3,
                                      admit_type = "Emergency",
                                      train_date = train_date,
@@ -905,12 +928,12 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                                          admit_type = "Elective", cohort3 = TRUE,
                                          wait_time_col = "p50_WT_ICDc", train_date = train_date,
                                          forecast_period = forecast_period,
-                                         only_ICD = single_icd, cut_off_dates = cutoff_dates)
+                                         only_ICD = single_icd, cut_off_dates = cutoff_dates, diagnostics_only = run_diags)
   print("Running electives mean wait and prop frail")
   test_cohort_1_new_mean <- forecast_function(cohort_1_ts_admissions, results_name = cohort_1_mean_plot,
                                               forecast_admissions = FALSE, forecast_wait = forecast_WT, forecast_frail = TRUE,
                                          admit_type = "Elective", cohort3 = TRUE,
-                                         wait_time_col = "mean_WT_ICDc", diagnostics_only = FALSE,
+                                         wait_time_col = "mean_WT_ICDc", diagnostics_only = run_diags,
                                          train_date = train_date, only_ICD = single_icd,
                                          forecast_period = forecast_period,  cut_off_dates = cutoff_dates)
   }
@@ -919,31 +942,33 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
                                                           admit_type = "Elective",
                                                           results_name = cohort_1_prop_plots,
                                                           forecast_period = forecast_period,
-                                                          train_date = train_date,  cutoff_dates = cutoff_dates)
+                                                          train_date = train_date,  cutoff_dates = cutoff_dates,
+                                                          run_diagnostic = run_diags)
   print("Running Emergency prop bundle")
   cohort_3_prop_bundle_forecast <- forecast_bundle_makeup(ts_data = cohort_3_prop_bundles,
                                                           results_name = cohort_3_prop_plots,
                                                           admit_type = "Emergency",
                                                           forecast_period = forecast_period,
-                                                          train_date = train_date,  cutoff_dates = cutoff_dates)
+                                                          train_date = train_date,  cutoff_dates = cutoff_dates,
+                                                          run_diagnostic = run_diags)
   
   ###############################################################################
   ## Lets get the neoplasms out of there! #######################################
   ###############################################################################
   
+  if(run_admis){
+    cohort_3_admi <- test_cohort_3[[1]]
+    cohort_3_frail <- test_cohort_3[[3]]
+    cohort_3_cc <- test_cohort_3[[4]]
   
-  cohort_3_admi <- test_cohort_3[[1]]
-  cohort_3_frail <- test_cohort_3[[3]]
-  cohort_3_cc <- test_cohort_3[[4]]
   
   
-  
-  cohort_1_admi <- test_cohort_1_new_median[[1]]
-  cohort_1_median_wait <- test_cohort_1_new_median[[2]]
-  cohort_1_mean_wait <- test_cohort_1_new_mean[[2]]
-  cohort_1_frail <- test_cohort_1_new_mean[[3]]
-  cohort_1_cc <- test_cohort_1_new_median[[4]]
-  
+    cohort_1_admi <- test_cohort_1_new_median[[1]]
+    cohort_1_median_wait <- test_cohort_1_new_median[[2]]
+    cohort_1_mean_wait <- test_cohort_1_new_mean[[2]]
+    cohort_1_frail <- test_cohort_1_new_mean[[3]]
+    cohort_1_cc <- test_cohort_1_new_median[[4]]
+  }
   
   if(forecast_admis)
     cohort_3_admi <- forecast_clean(cohort_3_admi, cohort_num = 3)
@@ -952,7 +977,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   if(forecast_cc)
     cohort_3_cc <- forecast_clean(cohort_3_cc, cohort_num = 3, transformed_log = TRUE)
   
-  cohort_3_prop_bundle_forecast <- forecast_clean(cohort_3_prop_bundle_forecast, cohort_num = 3, transformed = TRUE)
+  cohort_3_prop_bundle_forecast <- forecast_clean(cohort_3_prop_bundle_forecast, cohort_num = 3, transformed_log =  TRUE)
   
   if(forecast_admis)
     cohort_1_admi <- forecast_clean(cohort_1_admi, cohort_num = 1)
@@ -965,7 +990,7 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
     cohort_1_frail <- forecast_clean(cohort_1_frail, cohort_num = 1, transformed_log = TRUE)
   if(forecast_cc)
     cohort_1_cc <- forecast_clean(cohort_1_cc, cohort_num = 1, transformed_log = TRUE)
-  cohort_1_prop_bundle_forecast <- forecast_clean(cohort_1_prop_bundle_forecast, cohort_num = 1, transformed = TRUE)
+  cohort_1_prop_bundle_forecast <- forecast_clean(cohort_1_prop_bundle_forecast, cohort_num = 1, transformed_log = TRUE)
   
   cat("Done", "\n")
   end_time <- Sys.time()
@@ -974,38 +999,43 @@ running_forecasts <- function(total_cohort_data, train_date, forecast_period, si
   
   ## Writing out the results 
   cat("Writing out results")
-  
-  cohort_3_admis_csv <- paste(base_dir,"cohort_3_admissions.csv", sep = "")
-  cohort_3_frail_csv <- paste(base_dir,"cohort_3_frail.csv", sep = "")
-  cohort_3_cc_csv <- paste(base_dir,"cohort_3_cc.csv", sep = "")
+  if(run_admis){
+    cohort_3_admis_csv <- paste(base_dir,"cohort_3_admissions.csv", sep = "")
+    cohort_3_frail_csv <- paste(base_dir,"cohort_3_frail.csv", sep = "")
+    cohort_3_cc_csv <- paste(base_dir,"cohort_3_cc.csv", sep = "")
+  }
   cohort_3_prop_bundel_csv <- paste(base_dir, "cohort_3_prop_bundle.csv", sep="")
-  
-  cohort_1_admi_csv <- paste(base_dir, "cohort_1_pool.csv",sep = "")
-  cohort_1_mean_csv <- paste(base_dir, "cohort_1_mean_WT.csv",sep = "")
-  cohort_1_med_csv <- paste(base_dir, "cohort_1_median_WT.csv",sep = "")
-  cohort_1_frail_csv <- paste(base_dir, "cohort_1_frail.csv",sep = "")
-  cohort_1_cc_csv <- paste(base_dir, "cohort_1_cc.csv",sep = "")
+  if(run_admis){
+    cohort_1_admi_csv <- paste(base_dir, "cohort_1_pool.csv",sep = "")
+    cohort_1_mean_csv <- paste(base_dir, "cohort_1_mean_WT.csv",sep = "")
+    cohort_1_med_csv <- paste(base_dir, "cohort_1_median_WT.csv",sep = "")
+    cohort_1_frail_csv <- paste(base_dir, "cohort_1_frail.csv",sep = "")
+    cohort_1_cc_csv <- paste(base_dir, "cohort_1_cc.csv",sep = "")
+  }
   cohort_1_prop_bundel_csv <- paste(base_dir, "cohort_1_prop_bundle.csv", sep="")
   
-  write.csv(cohort_3_admi,
-            file = cohort_3_admis_csv, row.names = FALSE, quote = FALSE)
-  write.csv(cohort_3_frail,
-            file = cohort_3_frail_csv, row.names = FALSE, quote = FALSE)
-  write.csv(cohort_3_cc,
-            file = cohort_3_cc_csv, row.names = FALSE, quote = FALSE)
+  if(run_admis){
+    write.csv(cohort_3_admi,
+              file = cohort_3_admis_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_3_frail,
+              file = cohort_3_frail_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_3_cc,
+              file = cohort_3_cc_csv, row.names = FALSE, quote = FALSE)
+  }
   write.csv(cohort_3_prop_bundle_forecast,
             file = cohort_3_prop_bundel_csv,row.names = FALSE, quote = FALSE)
-  
-  write.csv(cohort_1_admi,
-            file = cohort_1_admi_csv, row.names = FALSE, quote = FALSE)
-  write.csv(cohort_1_mean_wait,
-            file = cohort_1_mean_csv, row.names = FALSE, quote = FALSE)
-  write.csv(cohort_1_median_wait,
-            file = cohort_1_med_csv, row.names = FALSE, quote = FALSE)
-  write.csv(cohort_1_frail,
-            file = cohort_1_frail_csv, row.names = FALSE, quote = FALSE)
-  write.csv(cohort_1_cc,
-            file = cohort_1_cc_csv, row.names = FALSE, quote = FALSE)
+  if(run_admis){
+    write.csv(cohort_1_admi,
+              file = cohort_1_admi_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_1_mean_wait,
+              file = cohort_1_mean_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_1_median_wait,
+              file = cohort_1_med_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_1_frail,
+              file = cohort_1_frail_csv, row.names = FALSE, quote = FALSE)
+    write.csv(cohort_1_cc,
+              file = cohort_1_cc_csv, row.names = FALSE, quote = FALSE)
+  }
   write.csv(cohort_1_prop_bundle_forecast,
             file = cohort_1_prop_bundel_csv,row.names = FALSE, quote = FALSE)
   

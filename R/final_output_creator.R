@@ -819,7 +819,54 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   phi3_df$COVID_AGE2[(forecast_length + 1):(2*forecast_length)] <- COVID_preds[1:forecast_length,9]
   phi3_df$COVID_AGE3[(forecast_length + 1):(2*forecast_length)] <- COVID_preds[1:forecast_length,10]
   
+  ## frailty forecasted now 
   
+  elec_frailty <- time_series_forecasts[[7]]
+  emerg_frailty <- time_series_forecasts[[2]]
+  
+  
+  icds_in_play <- union(elec_admis$icd_name, emerg_admis$icd_name)
+  
+  icd_cols <- rep(icds_in_play, each = 3)
+  age_cols <- rep(c(1,2,3), length(icds_in_play))
+  for(k in 1:length(icd_cols)){
+    if(nchar(icd_cols[k]) == 1)
+      icd_cols[k] <- paste("0",icd_cols[k], sep = "")
+  }
+  frailty_colnames <- paste("ICD",icd_cols,"_AGE",age_cols, sep = "")
+  frailty_icds <- phi_colnames
+  frailty_colnames <- c("t","a", frailty_colnames)
+  
+  
+  t_col <- rep(seq(0,length.out = forecast_length), 2)
+  a_col <- rep(c("N","E"), each = forecast_length)
+  
+  frailty_df <- data.frame(matrix(0, nrow = length(t_col), ncol = length(frailty_colnames)))
+  colnames(frailty_df) <- frailty_colnames
+  frailty_df$t <- t_col 
+  frailty_df$a <- a_col
+  
+  current_col <- 3
+  for(icdee in icds_in_play){
+    for(tiempo in c("1","2","3")){
+      current_elec_df <- elec_frailty[elec_admis$icd_name == as.character(icdee) &
+                                      elec_admis$age == tiempo,]
+      current_emerg_df <- emerg_frailty[emerg_admis$icd_name == as.character(icdee) &
+                                        emerg_admis$age == tiempo,]
+      if(nrow(current_elec_df) != 0){
+        frailty_df[1:forecast_length,current_col] <- current_elec_df$median
+      }
+      if(nrow(current_emerg_df) != 0){
+        frailty_df[(forecast_length + 1):(2*forecast_length), current_col] <- current_emerg_df$median
+      }
+      
+      print(paste(icdee,tiempo, sep = "-"))
+      print(frailty_colnames[current_col])
+      
+      current_col <- current_col + 1
+      
+    }
+  }
   
   
   ## pi_x df for transitions ##
@@ -848,9 +895,9 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   ## pi_y for transitions ##
   print("Working on the pi y transitions")
   
-  elec_res <- reg_res[[1]][[1]]
-  emerg_res <- reg_res[[2]][[1]]
-  coef_df <- reg_res[[1]][[2]]
+  elec_res <- reg_res[[1]]#[[1]]
+  emerg_res <- reg_res[[2]]#[[1]]
+  #coef_df <- reg_res[[1]][[2]]
   covid_res <- covid_probs
   covid_no_cc_dat <- covid_no_cc
   
@@ -862,15 +909,15 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
     
     current_week_res_elec <- elec_res[elec_res$week == weeker,]
     current_week_res_emerg <- emerg_res[emerg_res$week == weeker,]
-    current_coef_df <- coef_df[coef_df$week == weeker,]
+    #current_coef_df <- coef_df[coef_df$week == weeker,]
     current_covid_rows <- covid_res[covid_res$week == weeker,]
     current_non_cc_rows <- covid_no_cc_dat[covid_no_cc_dat$week == weeker,]
     
     
     
-    ga_coef_rows <- grep("ga", x = coef_df$patient_group)
-    ga_coef <- coef_df[ga_coef_rows,]
-    cc_coef <- coef_df[-ga_coef_rows,]
+    #ga_coef_rows <- grep("ga", x = coef_df$patient_group)
+    #ga_coef <- coef_df[ga_coef_rows,]
+    #cc_coef <- coef_df[-ga_coef_rows,]
     
     pi_y_a_row <- rep(c("N","E"), each = 4*length(pi_x_df$p))
     pi_y_p_row <- rep(pi_x_df$p, each = 8)
@@ -1018,7 +1065,7 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   }
   
   icd_15_age_3_col <- which(colnames(prop_df) == "ICD15_AGE3")
-  prop_df <- prop_df[,1:icd_15_age_3_col[1]]
+  prop_df <- prop_df[,1:17]
   
   
   ## x0 pool of patients 
@@ -1052,22 +1099,27 @@ sum_up_function <- function(reg_res, time_series_data_res, time_series_forecasts
   y0_df$a <- rep(c("N","E"), each = 2*length(phi_icds))
   y0_df$p <- rep(phi_icds, 4)
   y0_df$s <- rep(c("G","C","G","C"), each = length(phi_icds))
-  y0_df$combo <- paste(y0_df$a, y0_df$p, y0_df$s, sep = "-")
+  #y0_df$combo <- paste(y0_df$a, y0_df$p, y0_df$s, sep = "-")
   
-  in_hops_patients$combo <- paste(in_hops_patients$a, in_hops_patients$p, in_hops_patients$s, sep = "-")
-  colnames(in_hops_patients) <- c("admit","patient_group","ward","one","combo")
+  #in_hops_patients$combo <- paste(in_hops_patients$a, in_hops_patients$p, in_hops_patients$s, sep = "-")
+  #colnames(in_hops_patients) <- c("admit","patient_group","ward","one","combo")
   
-  y0_df <- dplyr::left_join(y0_df, in_hops_patients, by = c("combo" = "combo"))
-  y0_df <- y0_df[,c(1,2,3,9)]
+  y0_df <- dplyr::left_join(y0_df, in_hops_patients, by = c("a" = "a",
+                                                            "p" = "p",
+                                                            "s" = "s"))
+  # y0_df <- y0_df[,c(1,2,3,9)]
+  # colnames(y0_df)[4] <- "y0"
+  # y0_df$y0[which(is.na(y0_df$y0))] <- 0
+  # 
+  y0_df <- y0_df[,c(1,2,3,5)]
   colnames(y0_df)[4] <- "y0"
-  y0_df$y0[which(is.na(y0_df$y0))] <- 0
-  
   
   
   df_list <- list("phi1" = phi_df, "phi2" = phi2_df, "phi3" = phi3_df,
                   "pi_x" = pi_x_df, "pi_y" = tot_pi_y,
                   "pi_z" = pi_z_df, "ICDprop" = prop_df,
-                  "x0" = x0_df, "y0" = y0_df)
+                  "x0" = x0_df, "y0" = y0_df, 
+                  "frailty" = frailty_df)
   
   write.xlsx(df_list, file = out_sheet)
   
