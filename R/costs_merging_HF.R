@@ -182,25 +182,25 @@ costs_function <- function(transitions_data_whole, costs_directory, output_dir, 
   ############################################################################
   # append all matched dataframes to form complete hes-cost merge
   full_mergedcosts <- rbind(matched_orglevel_1819,
-                            merged_rcslevel_1819,
+                            matched_rcslevel_1819,
                             matched_orglevel_1718,
-                            merged_rcslevel_1718,
+                            matched_rcslevel_1718,
                             matched_orglevel_1617,
-                            merged_rcslevel_1617,
+                            matched_rcslevel_1617,
                             matched_orglevel_1516,
                             merged_rcslevel_1516)
   
   # figure out how many unmatched episodes we still have after this
   print('Number of uncosted HES episodes')
   unmatched <- sum(is.na(full_mergedcosts$unitcost))
-  unmatched
+  print(unmatched)
   
   print('Number of HES episodes')
   total <- nrow(full_mergedcosts)
-  total
+  print(total)
   
   print('Percentage of HES episodes unmatched')
-  (unmatched/total)*100
+  print((unmatched/total)*100)
   
   # drop unmatched from full_mergedcosts$unitcost
   full_mergedcosts <- full_mergedcosts[!is.na(full_mergedcosts$unitcost),]
