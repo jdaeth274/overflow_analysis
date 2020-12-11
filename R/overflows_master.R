@@ -313,19 +313,24 @@ c("1516", "1617", "1718", "1819") %>%
                 costs_directory = "../Reference costs/", 
                 output_dir = here::here("costing_results"), fyear = .x))
 
-full_mergedcosts <- readRDS(here::here("costing_results", "mergedcosts_1516.Rds"))
-
-costs_1617 <- readRDS(here::here("costing_results", "mergedcosts_1617.Rds"))
-full_mergedcosts <- rbind(full_mergedcosts, costs_1617)
-rm(costs_1617)
+full_mergedcosts <- readRDS(here::here("costing_results", "mergedcosts_1819.Rds"))
 
 costs_1718 <- readRDS(here::here("costing_results", "mergedcosts_1718.Rds"))
 full_mergedcosts <- rbind(full_mergedcosts, costs_1718)
 rm(costs_1718)
 
-costs_1819 <- readRDS(here::here("costing_results", "mergedcosts_1617.Rds"))
+calculate_unitcosts(full_mergedcosts, 
+                    costs_directory = "../Reference costs/", 
+                    output_dir = here::here("costing_results_1719"))
+
+
+costs_1617 <- readRDS(here::here("costing_results", "mergedcosts_1617.Rds"))
+full_mergedcosts <- rbind(full_mergedcosts, costs_1617)
+rm(costs_1617)
+
+costs_1516 <- readRDS(here::here("costing_results", "mergedcosts_1516.Rds"))
 full_mergedcosts <- rbind(full_mergedcosts, costs_1819)
-rm(costs_1819)
+rm(costs_1516)
 
 saveRDS(full_mergedcosts, here::here("costing_results", "full_mergedcosts.Rds"))
 
